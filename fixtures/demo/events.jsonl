@@ -1,0 +1,13 @@
+{"ts":1793863157305,"kind":"start","msg":"treering bot started (mainnet)"}
+{"ts":1793863457305,"kind":"cycle","msg":"cycle: equity $140.09, 6 order(s), sent"}
+{"ts":1793863757305,"kind":"fill","msg":"OPEN BTC: filled 0.00026 @ 80410"}
+{"ts":1793864057305,"kind":"fill","msg":"OPEN ETH: filled 0.0066 @ 2431.2"}
+{"ts":1793864357305,"kind":"fill","msg":"OPEN SOL: filled 0.3 @ 96.9"}
+{"ts":1793864657305,"kind":"fill","msg":"OPEN HYPE: filled 0.13 @ 82.1"}
+{"ts":1793864957305,"kind":"fill","msg":"OPEN ZEC: filled 0.02 @ 1310.5"}
+{"ts":1793865257305,"kind":"fill","msg":"OPEN NEAR: filled 8.3 @ 4.06"}
+{"ts":1793865557305,"kind":"cycle","msg":"cycle: equity $140.61, 0 order(s), not sent: no orders needed"}
+{"ts":1793865857305,"kind":"control","msg":"paused"}
+{"ts":1793866157305,"kind":"control","msg":"resumed"}
+{"ts":1793866457305,"kind":"error","msg":"cycle error: Signal API HTTP 502"}
+{"ts":1793866757305,"kind":"cycle","msg":"cycle: equity $141.18, 1 order(s), not sent: dry-run (live is off)"}

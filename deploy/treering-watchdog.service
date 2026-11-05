@@ -1,0 +1,9 @@
+# Runs from treering-watchdog.timer. Assumes the repo is cloned to ~/treering; edit the paths if not.
+[Unit]
+Description=Treering watchdog (alerts if the bot stops cycling)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/treering
+ExecStart=/usr/bin/env node %h/treering/src/watchdog.js
+UMask=0077

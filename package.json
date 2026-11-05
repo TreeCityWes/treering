@@ -1,0 +1,26 @@
+{
+  "name": "treering",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mood Ring copy-signal bot for Hyperliquid, with a terminal dashboard",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "bot": "node src/bot.js",
+    "tui": "node src/tui.js",
+    "once": "node src/bot.js --once",
+    "test": "node --test test/",
+    "watch": "watch -c -t -n 2 node src/tui.js --plain"
+  },
+  "dependencies": {
+    "@nktkas/hyperliquid": "0.32.2",
+    "viem": "2.52.2"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TreeCityWes/treering"
+  }
+}

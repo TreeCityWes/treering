@@ -1,0 +1,172 @@
+#!/usr/bin/env node
+// Mood Ring bot: every cycle, read the public Mood Ring scores, size targets, and
+// trade the owner account through a trading-only API wallet. Dry-run until `live` is on.
+import { ALL_MARKETS, PATHS, loadConfig, loadCredentials, ensureDataDir } from "./config.js";
+import { makeClients, loadMarkets, fetchSignal, snapshot, sendOrders } from "./hl.js";
+import { targetRows, buildOrders, formatSize, formatPrice } from "./strategy.js";
+import { readControl, updateControl, readState, readJson, writeJson, logEvent } from "./control.js";
+import { detectStopFills, syncStops, cancelAllStops } from "./stops.js";
+import { X1_BUILDER } from "./config.js";
+import { notify, alertsEnabled, alertState, saveAlertState, money } from "./alerts.js";
+
+const once = process.argv.includes("--once");
+const MIN_EQUITY = 15;
+const say = (msg, extra = {}) => { const e = logEvent({ msg, ...extra }); console.log(`${new Date(e.ts).toISOString()} ${msg}`); };
+
+ensureDataDir();
+const cfg = loadConfig();
+const creds = loadCredentials();
+const network = creds.network ?? cfg.network;
+const { info, exchange, agent } = makeClients({ ...creds, network });
+const markets = await loadMarkets(info, ALL_MARKETS);
+let state = readState() ?? {};
+// Stop book: trail state, resting stop oids, re-entry blocks. Persisted across restarts.
+const book = { trail: {}, oids: {}, blocks: {}, ...readJson(PATHS.stops, {}) };
+const saveBook = () => writeJson(PATHS.stops, book);
+const A = alertState();
+
+function dailySummary(prev, out) {
+  const pnl = (prev.equity ?? 0) - (prev.dayStart ?? prev.equity ?? 0), pct = prev.dayStart ? (pnl / prev.dayStart) * 100 : 0;
+  const pos = Object.entries(out.positions ?? {}).filter(([, p]) => Math.abs(p.szi) > 0)
+    .map(([c, p]) => `${c} ${p.szi > 0 ? "long" : "short"} ${money(Math.abs(p.value ?? 0))} (uPnL ${money(p.upnl, true)})`);
+  const stops = (out.stops ?? []).filter((x) => x.status === "resting").length;
+  return [`📊 Treering daily summary for ${prev.day} (UTC)`, `Equity ${money(prev.dayStart)} → ${money(prev.equity)}  (${money(pnl, true)}, ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`,
+    `Mode: ${out.live ? "LIVE" : "dry-run"}${out.paused ? ", paused" : ""}`, pos.length ? `Positions:\n${pos.join("\n")}` : "No open positions", `Stops resting: ${stops}/${pos.length}`].join("\n");
+}
+
+async function alertsFor(prev, out, stopEvents) {
+  if (!alertsEnabled()) return;
+  const msgs = [];
+  for (const e of stopEvents) msgs.push(`🛑 ${e.msg}`);
+  if (prev.live !== undefined && prev.live !== out.live) msgs.push(out.live ? "🔴 LIVE trading turned ON" : "⚪ Live trading turned OFF (dry-run). Open positions keep their stops.");
+  if (prev.paused !== undefined && prev.paused !== out.paused) msgs.push(out.paused ? "⏸ Bot paused" : "▶ Bot resumed");
+  if (out.fills?.length) msgs.push(`${out.fills.some((f) => f.error) ? "⚠️ Some orders were rejected" : "✅ Sent"} ${out.fills.length} order(s) · equity ${money(out.equity)}\n` + out.fills.map((f) => `${f.tag} ${f.coin}: ${f.error ? `ERROR ${f.error}` : f.filled ? `filled ${f.filled} @ ${f.avgPx}` : "not filled"}`).join("\n"));
+  if (out.error) {
+    if (!A.errorSince) { A.errorSince = out.ts; A.errorCount = 1; msgs.push(`⚠️ Cycle error: ${out.error}`); }
+    else if (++A.errorCount === 6) msgs.push(`⚠️ Still failing after 6 cycles (~30 min): ${out.error}`);
+  } else if (A.errorSince) { msgs.push(`✅ Recovered after ${A.errorCount} failed cycle(s)`); delete A.errorSince; delete A.errorCount; }
+  if (out.killed && !prev.killed) msgs.push(`🛑 Daily loss stop hit: equity ${money(out.equity)} (${money(out.dayPnl, true)} today). Only reductions until UTC midnight.`);
+  const stale = /signal stale/.test(out.skip ?? "");
+  if (stale && !A.stale) { A.stale = true; msgs.push(`⚠️ Mood Ring signal is stale, so the bot is not trading (${out.skip}).`); }
+  else if (!stale && A.stale && !out.error) { A.stale = false; msgs.push("✅ Signal is fresh again; trading resumed"); }
+  const today = new Date().toISOString().slice(0, 10);
+  if (out.agentValidUntil) {
+    const d = (out.agentValidUntil - Date.now()) / 864e5;
+    if (d < 7 && A.expiryWarned !== today) { A.expiryWarned = today; msgs.push(`⏳ API wallet expires in ${Math.max(0, d).toFixed(1)} days. Authorize a new one on X1 Terminal's /API page and update .env.agent, or trading stops.`); }
+  }
+  const held = Object.values(out.positions ?? {}).filter((p) => Math.abs(p.szi) > 0).length;
+  const resting = (out.stops ?? []).filter((x) => x.status === "resting").length;
+  const missing = !out.error && held > 0 && cfg.stops.enabled && resting < held;
+  if (missing && !A.stopsMissing) { A.stopsMissing = true; msgs.push(`⚠️ Only ${resting}/${held} positions have a stop-loss resting on the exchange`); }
+  else if (!missing && A.stopsMissing && !out.error) { A.stopsMissing = false; msgs.push(`✅ All ${held} positions have resting stops again`); }
+  if (prev.day && out.day && prev.day !== out.day) msgs.push(dailySummary(prev, out));
+  saveAlertState(A);
+  for (const m of msgs) await notify(m);
+}
+let stopping = false;
+
+function flattenOrders(snap) {
+  return Object.entries(snap.positions).filter(([coin, p]) => markets[coin] && p.szi !== 0).map(([coin, p]) => {
+    const m = markets[coin], mid = snap.mids[coin] || Math.abs(p.value / p.szi), isBuy = p.szi < 0;
+    const px = formatPrice(isBuy ? mid * (1 + cfg.slippage) : mid * (1 - cfg.slippage), m.szDecimals), sz = formatSize(Math.abs(p.szi), m.szDecimals);
+    return { coin, tag: "FLATTEN", isBuy, sz, px, ntl: Math.abs(p.szi) * mid, reduceOnly: true, wire: { a: m.asset, b: isBuy, p: px, s: sz, r: true, t: { limit: { tif: "Ioc" } } } };
+  });
+}
+
+async function cycle(reason) {
+  const ctl = readControl();
+  const started = Date.now();
+  const stopEvents = [];
+  const out = { ts: started, pid: process.pid, network, owner: creds.owner, agent, live: ctl.live, paused: ctl.paused, reason, cfg, skip: null, error: null, rows: [], orders: [], fills: [] };
+  try {
+    const [snap, signal] = await Promise.all([snapshot(info, creds.owner, markets), fetchSignal()]);
+    const me = snap.agents.find((a) => a.address.toLowerCase() === agent.toLowerCase());
+    const day = new Date().toISOString().slice(0, 10);
+    const dayStart = state.day === day && state.dayStart > 0 ? state.dayStart : snap.equity;
+    const dayPnl = snap.equity - dayStart;
+    const killed = dayStart > 0 && dayPnl <= -cfg.killPct * dayStart;
+    Object.assign(out, {
+      mode: snap.mode, equity: snap.equity, day, dayStart, dayPnl, killed, spot: snap.spot, positions: snap.positions, mids: snap.mids,
+      agentValidUntil: me?.validUntil ?? null, builderFeeOk: snap.builderFeeUnits >= 50,
+      signal: { timestamp: signal.timestamp, coins: signal.coins.map(({ history, ...c }) => c) },
+    });
+    const signalAge = signal.timestamp ? (Date.now() - signal.timestamp) / 1000 : Infinity;
+    const sc = cfg.stops;
+    if (sc.enabled) for (const e of await detectStopFills({ info, owner: creds.owner, book, positions: snap.positions, signal, sc, now: Date.now() })) { say(e.msg, e); if (e.stop) stopEvents.push(e); }
+    out.rows = targetRows({ equity: snap.equity, cfg, signal, current: snap.current, killed });
+    // Re-entry block: a coin whose stop fired is not re-opened until its signal changes.
+    for (const r of out.rows) if (book.blocks[r.coin]) Object.assign(r, { target: r.current, gap: 0, actions: ["BLOCKED"], blocked: book.blocks[r.coin] });
+
+    if (ctl.flatten) out.orders = flattenOrders(snap);
+    else out.orders = buildOrders(out.rows, { markets, mids: snap.mids, positions: snap.positions, slippage: cfg.slippage, minOrderUsd: cfg.minOrderUsd });
+
+    if (!me || me.validUntil <= Date.now()) out.skip = "API wallet not authorized or expired";
+    else if (cfg.builderFee && !out.builderFeeOk) out.skip = "builder fee not approved";
+    else if (!ctl.flatten && signalAge > cfg.maxSignalAgeSec) out.skip = `signal stale (${Math.round(signalAge)}s old)`;
+    else if (!ctl.flatten && snap.equity < MIN_EQUITY) out.skip = `equity $${snap.equity.toFixed(2)} below $${MIN_EQUITY}`;
+    else if (ctl.paused && !ctl.flatten) out.skip = "paused";
+    else if (!out.orders.length) out.skip = "no orders needed";
+
+    if (!out.skip && !ctl.live) out.skip = "dry-run (live is off)";
+    if (!out.skip) {
+      out.fills = await sendOrders(exchange, out.orders, cfg.builderFee);
+      for (const f of out.fills) say(`${f.tag} ${f.coin}: ${f.error ? `ERROR ${f.error}` : f.filled ? `filled ${f.filled} @ ${f.avgPx}` : "not filled"}`, { kind: "fill", ...f });
+    }
+    // Stop sync: every open position gets one resting stop on the exchange (after this cycle's fills).
+    const approved = me && me.validUntil > Date.now();
+    if (ctl.flatten && !out.skip && approved) {
+      const n = await cancelAllStops({ info, exchange, owner: creds.owner, markets });
+      book.trail = {}; book.oids = {};
+      if (n) say(`flatten: cancelled ${n} resting stop(s)`, { kind: "control" });
+    } else if (sc.enabled && approved) {
+      // After fills, Hyperliquid's account view can lag by a moment. Re-read until every filled coin's
+      // size has changed from the pre-trade snapshot (up to ~6s), so stops are sized to the new position.
+      let positions = snap.positions;
+      const filled = out.fills.filter((f) => f.filled > 0).map((f) => f.coin);
+      for (let i = 0; filled.length && i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        positions = (await snapshot(info, creds.owner, markets)).positions;
+        if (filled.every((c) => (positions[c]?.szi ?? 0) !== (snap.positions[c]?.szi ?? 0))) break;
+      }
+      const send = ctl.live || sc.whenNotLive;
+      const res = await syncStops({ info, exchange, owner: creds.owner, markets, book, positions, mids: snap.mids, sc, send, builder: cfg.builderFee ? X1_BUILDER : null });
+      out.stops = res.rows;
+      for (const e of res.events) say(e.msg, e);
+    }
+    out.blocks = book.blocks;
+    saveBook();
+    if (ctl.flatten) { updateControl({ flatten: false, paused: true }); out.paused = true; say(out.skip ? `flatten requested but not sent: ${out.skip}` : "flatten done; bot paused", { kind: "control" }); }
+    say(`cycle: equity $${snap.equity.toFixed(2)}, ${out.orders.length} order(s)${out.skip ? `, not sent: ${out.skip}` : ", sent"}`, { kind: "cycle", equity: snap.equity, orders: out.orders.length, skip: out.skip, live: ctl.live });
+  } catch (err) {
+    out.error = err instanceof Error ? err.message : String(err);
+    if (creds.key) out.error = out.error.replaceAll(creds.key, "[REDACTED]");
+    say(`cycle error: ${out.error}`, { kind: "error" });
+  }
+  out.durationMs = Date.now() - started;
+  out.nextCycleAt = once ? null : Date.now() + cfg.intervalSec * 1000;
+  const prev = state;
+  state = { ...state, ...out, day: out.day ?? state.day, dayStart: out.dayStart ?? state.dayStart };
+  writeJson(PATHS.state, state);
+  await alertsFor(prev, out, stopEvents).catch((e) => console.error(`alerts: ${e.message}`));
+}
+
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { stopping = true; });
+
+say(`treering bot started (${network}, owner ${creds.owner}, agent ${agent}, markets ${cfg.markets.join(" ")})`, { kind: "start" });
+if (readControl().live) say("LIVE trading is ON", { kind: "control" });
+// Announce starts, but at most once per 10 minutes so a crash loop doesn't flood Telegram.
+if (alertsEnabled() && !once && Date.now() - (A.lastStart ?? 0) > 600_000) {
+  A.lastStart = Date.now(); saveAlertState(A);
+  await notify(`▶ Treering bot started (${network}, ${readControl().live ? "LIVE" : "dry-run"}, markets ${cfg.markets.join(" ")})`);
+}
+await cycle(once ? "once" : "startup");
+
+while (!once && !stopping) {
+  await new Promise((r) => setTimeout(r, 1000));
+  const ctl = readControl();
+  if (ctl.runNow || ctl.flatten) { updateControl({ runNow: false }); await cycle(ctl.flatten ? "flatten" : "manual"); }
+  else if (Date.now() >= state.nextCycleAt) await cycle("schedule");
+}
+say("treering bot stopped", { kind: "stop" });
+if (!once) await notify("■ Treering bot stopped. Open positions keep their resting stop-losses.");
+writeJson(PATHS.state, { ...state, pid: null, nextCycleAt: null });

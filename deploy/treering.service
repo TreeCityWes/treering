@@ -1,0 +1,19 @@
+# systemd user unit. Assumes the repo is cloned to ~/treering; edit the paths if not.
+# Install: cp deploy/treering.service ~/.config/systemd/user/ && systemctl --user enable --now treering
+# (run `loginctl enable-linger $USER` once so it keeps running after you log out)
+[Unit]
+Description=Treering - Mood Ring signal bot for Hyperliquid
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/treering
+ExecStart=/usr/bin/env node %h/treering/src/bot.js
+Restart=always
+RestartSec=15
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,346 @@
+{
+  "ts": 1793866962305,
+  "pid": null,
+  "network": "mainnet",
+  "owner": "0x00000000000000000000000000000000DE0A0001",
+  "agent": "0x00000000000000000000000000000000DE0A0002",
+  "live": false,
+  "paused": false,
+  "reason": "startup",
+  "cfg": {
+    "network": "mainnet",
+    "leverage": 3,
+    "killPct": 0.1,
+    "minOrderUsd": 10,
+    "markets": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "HYPE",
+      "ZEC",
+      "NEAR"
+    ],
+    "intervalSec": 300,
+    "slippage": 0.01,
+    "maxSignalAgeSec": 600,
+    "builderFee": true
+  },
+  "skip": "dry-run (live is off)",
+  "rows": [
+    {
+      "coin": "BTC",
+      "score": -30,
+      "label": "Bearish",
+      "current": -20.943649999999998,
+      "target": -21.0132563985,
+      "gap": 0,
+      "actions": [
+        "SKIP"
+      ]
+    },
+    {
+      "coin": "ETH",
+      "score": -23,
+      "label": "Bearish",
+      "current": -15.99675,
+      "target": -16.11016323885,
+      "gap": 0,
+      "actions": [
+        "SKIP"
+      ]
+    },
+    {
+      "coin": "SOL",
+      "score": -42,
+      "label": "Bearish",
+      "current": -28.94655,
+      "target": -29.4185589579,
+      "gap": 0,
+      "actions": [
+        "SKIP"
+      ]
+    },
+    {
+      "coin": "HYPE",
+      "score": -15,
+      "label": "Neutral",
+      "current": -10.837125,
+      "target": -10.50662819925,
+      "gap": 0,
+      "actions": [
+        "SKIP"
+      ]
+    },
+    {
+      "coin": "ZEC",
+      "score": 40,
+      "label": "Bullish",
+      "current": 26.419,
+      "target": 37.619,
+      "gap": 11.2,
+      "actions": [
+        "ADD"
+      ]
+    },
+    {
+      "coin": "NEAR",
+      "score": -48,
+      "label": "Bearish",
+      "current": -33.49008500000001,
+      "target": -33.621210237599996,
+      "gap": 0,
+      "actions": [
+        "SKIP"
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "coin": "ZEC",
+      "tag": "ADD",
+      "isBuy": true,
+      "sz": "0.01",
+      "px": "1334.2",
+      "ntl": 13.2,
+      "reduceOnly": false
+    }
+  ],
+  "fills": [],
+  "mode": "unifiedAccount",
+  "equity": 141.18,
+  "day": "2026-11-05",
+  "dayStart": 140.09,
+  "dayPnl": 1.09,
+  "killed": false,
+  "spot": [
+    {
+      "coin": "USDC",
+      "total": 140.08837599
+    },
+    {
+      "coin": "USOL",
+      "total": 0.00064807
+    }
+  ],
+  "positions": {
+    "BTC": {
+      "szi": -0.00026,
+      "entryPx": 80410,
+      "upnl": 0.17,
+      "value": 20.943649999999998
+    },
+    "ETH": {
+      "szi": -0.0066,
+      "entryPx": 2431.2,
+      "upnl": 0.13,
+      "value": 15.99675
+    },
+    "SOL": {
+      "szi": -0.3,
+      "entryPx": 96.9,
+      "upnl": 0.21,
+      "value": 28.94655
+    },
+    "HYPE": {
+      "szi": -0.13,
+      "entryPx": 82.1,
+      "upnl": -0.13,
+      "value": 10.837125
+    },
+    "ZEC": {
+      "szi": 0.02,
+      "entryPx": 1310.5,
+      "upnl": 0.39,
+      "value": 26.419
+    },
+    "NEAR": {
+      "szi": -8.3,
+      "entryPx": 4.06,
+      "upnl": 0.33,
+      "value": 33.49008500000001
+    }
+  },
+  "mids": {
+    "BTC": 80552.5,
+    "ETH": 2423.75,
+    "SOL": 96.4885,
+    "NEAR": 4.03495,
+    "HYPE": 83.3625,
+    "ZEC": 1320.95,
+    "xyz:NVDA": 199.105,
+    "xyz:GOLD": 4125.75,
+    "xyz:INTC": 56.9485,
+    "xyz:GOOGL": 292.23,
+    "xyz:MU": 775.59,
+    "xyz:BRENTOIL": 94.9585
+  },
+  "agentValidUntil": 1796457586607,
+  "builderFeeOk": true,
+  "signal": {
+    "timestamp": 1793866948244,
+    "coins": [
+      {
+        "coin": "BTC",
+        "score": -30,
+        "label": "Bearish",
+        "tradersLong": 4,
+        "tradersShort": 15
+      },
+      {
+        "coin": "ETH",
+        "score": -23,
+        "label": "Bearish",
+        "tradersLong": 4,
+        "tradersShort": 11
+      },
+      {
+        "coin": "SOL",
+        "score": -42,
+        "label": "Bearish",
+        "tradersLong": 1,
+        "tradersShort": 5
+      },
+      {
+        "coin": "HYPE",
+        "score": -15,
+        "label": "Neutral",
+        "tradersLong": 7,
+        "tradersShort": 9
+      },
+      {
+        "coin": "ZEC",
+        "score": 40,
+        "label": "Bullish",
+        "tradersLong": 7,
+        "tradersShort": 9
+      },
+      {
+        "coin": "NEAR",
+        "score": -48,
+        "label": "Bearish",
+        "tradersLong": 3,
+        "tradersShort": 6
+      },
+      {
+        "coin": "xyz:GOOGL",
+        "score": 28,
+        "label": "Bullish",
+        "tradersLong": 3,
+        "tradersShort": 1
+      },
+      {
+        "coin": "xyz:SOXL",
+        "score": -87,
+        "label": "Strong bearish",
+        "tradersLong": 2,
+        "tradersShort": 2
+      },
+      {
+        "coin": "xyz:NVDA",
+        "score": -36,
+        "label": "Bearish",
+        "tradersLong": 3,
+        "tradersShort": 1
+      },
+      {
+        "coin": "xyz:BRENTOIL",
+        "score": -36,
+        "label": "Bearish",
+        "tradersLong": 3,
+        "tradersShort": 4
+      },
+      {
+        "coin": "xyz:GOLD",
+        "score": -7,
+        "label": "Neutral",
+        "tradersLong": 3,
+        "tradersShort": 1
+      },
+      {
+        "coin": "xyz:MU",
+        "score": -85,
+        "label": "Strong bearish",
+        "tradersLong": 2,
+        "tradersShort": 4
+      },
+      {
+        "coin": "xyz:INTC",
+        "score": -24,
+        "label": "Bearish",
+        "tradersLong": 3,
+        "tradersShort": 1
+      }
+    ]
+  },
+  "durationMs": 503,
+  "nextCycleAt": 1793867262305,
+  "stops": [
+    {
+      "coin": "BTC",
+      "side": -1,
+      "size": 0.00026,
+      "entry": 80410,
+      "stopPx": 80329.6,
+      "armed": true,
+      "best": 80410,
+      "distPct": 0.08,
+      "status": "resting"
+    },
+    {
+      "coin": "ETH",
+      "side": -1,
+      "size": 0.0066,
+      "entry": 2431.2,
+      "stopPx": 2625.696,
+      "armed": false,
+      "best": 2431.2,
+      "distPct": 0.08,
+      "status": "resting"
+    },
+    {
+      "coin": "SOL",
+      "side": -1,
+      "size": 0.3,
+      "entry": 96.9,
+      "stopPx": 104.652,
+      "armed": false,
+      "best": 96.9,
+      "distPct": 0.08,
+      "status": "resting"
+    },
+    {
+      "coin": "HYPE",
+      "side": -1,
+      "size": 0.13,
+      "entry": 82.1,
+      "stopPx": 88.668,
+      "armed": false,
+      "best": 82.1,
+      "distPct": 0.08,
+      "status": "resting"
+    },
+    {
+      "coin": "ZEC",
+      "side": 1,
+      "size": 0.02,
+      "entry": 1310.5,
+      "stopPx": 1205.66,
+      "armed": false,
+      "best": 1310.5,
+      "distPct": 0.08,
+      "status": "resting"
+    },
+    {
+      "coin": "NEAR",
+      "side": -1,
+      "size": 8.3,
+      "entry": 4.06,
+      "stopPx": 4.3848,
+      "armed": false,
+      "best": 4.06,
+      "distPct": 0.08,
+      "status": "resting"
+    }
+  ],
+  "blocks": {}
+}

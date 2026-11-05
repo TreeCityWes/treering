@@ -1,0 +1,5 @@
+!.env.*.example
+.env.agent
+.env.alerts
+data/
+node_modules/
