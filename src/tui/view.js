@@ -180,7 +180,8 @@ function kpiLine(m, W) {
   if (m.s && held) { const rest = (m.s.stops ?? []).filter((x) => x.status === "resting").length; items.push(`${C.mute("stops")} ${(rest >= held ? C.up : C.warn)(`${rest}/${held}`)}`); }
   // Shed the least important items (leverage, then signal age) before anything is cut off.
   const o = m.s?.pnl ? 1 : 0;
-  for (const drop of [[], [3 + o], [3 + o, 4 + o], [2, 3 + o, 4 + o]]) {
+  // With P&L shown, it goes before stop room (a safety KPI) when space runs out.
+  for (const drop of o ? [[], [4], [4, 5], [2, 4, 5]] : [[], [3], [3, 4]]) {
     const keep = items.filter((_, i) => !drop.includes(i));
     for (const sep of ["   ", "  ", " "]) { const out = " " + keep.join(sep); if (width(out) <= W) return out; }
   }

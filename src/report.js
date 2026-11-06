@@ -22,8 +22,8 @@ const activity = {
   cyclesWithOrders: hist.filter((h) => h.fills?.length).length,
   smallSkips: hist.reduce((n, h) => n + Object.values(h.plan ?? {}).filter((r) => r.small).length, 0),
   errors: hist.filter((h) => h.error).length,
-  maxEquity: hist.length ? Math.max(...hist.map((h) => h.equity ?? -Infinity)) : null,
-  minEquity: hist.length ? Math.min(...hist.map((h) => h.equity ?? Infinity)) : null,
+  maxEquity: hist.length ? hist.reduce((m, h) => Math.max(m, h.equity ?? -Infinity), -Infinity) : null,
+  minEquity: hist.length ? hist.reduce((m, h) => Math.min(m, h.equity ?? Infinity), Infinity) : null,
 };
 
 if (json) { console.log(JSON.stringify({ pnl: p, activity }, null, 2)); process.exit(0); }

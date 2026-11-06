@@ -90,6 +90,7 @@ async function cycle(reason) {
   const out = { ts: started, pid: process.pid, network, owner: creds.owner, agent, live: ctl.live, paused: ctl.paused, reason, cfg, skip: null, error: null, pnl: null, pnlError: null, rows: [], orders: [], fills: [] };
   try {
     const [snap, signal] = await Promise.all([snapshot(info, creds.owner, markets), fetchSignal()]);
+    const snapAt = Date.now();
     const me = snap.agents.find((a) => a.address.toLowerCase() === agent.toLowerCase());
     const day = new Date().toISOString().slice(0, 10);
     const dayStart = state.day === day && state.dayStart > 0 ? state.dayStart : snap.equity;
@@ -103,6 +104,7 @@ async function cycle(reason) {
     const signalAge = signal.timestamp ? (Date.now() - signal.timestamp) / 1000 : Infinity;
     const sc = cfg.stops;
     if (sc.enabled) for (const e of await detectStopFills({ info, owner: creds.owner, book, positions: snap.positions, signal, sc, now: Date.now() })) { say(e.msg, e); if (e.stop) stopEvents.push(e); }
+    out.stopEvents = stopEvents;
     out.rows = targetRows({ equity: snap.equity, cfg, signal, current: snap.current, killed });
     // Re-entry block: a coin whose stop fired is not re-opened until its signal changes.
     for (const r of out.rows) if (book.blocks[r.coin]) Object.assign(r, { target: r.current, gap: 0, actions: ["BLOCKED"], blocked: book.blocks[r.coin] });
@@ -148,8 +150,8 @@ async function cycle(reason) {
     // Running P&L since the start point in data/pnl.json. A failure here never fails the cycle.
     try {
       const upnl = Object.values(snap.positions).reduce((n, p) => n + (p.upnl || 0), 0);
-      out.pnl = await fetchPnl(info, creds.owner, { equity: snap.equity, upnl, unified: snap.mode === "unifiedAccount" });
-    } catch (e) { out.pnlError = e.message ?? String(e); out.pnl = state.pnl ?? null; }
+      out.pnl = await fetchPnl(info, creds.owner, { equity: snap.equity, upnl, unified: snap.mode === "unifiedAccount", asOf: snapAt });
+    } catch (e) { out.pnlError = e.message ?? String(e); out.pnl = state.pnl ? { ...state.pnl, stale: true } : null; }
     if (ctl.flatten) { updateControl({ flatten: false, paused: true }); out.paused = true; say(out.skip ? `flatten requested but not sent: ${out.skip}` : "flatten done; bot paused", { kind: "control" }); }
     say(`cycle: equity $${snap.equity.toFixed(2)}, ${out.orders.length} order(s)${out.skip ? `, not sent: ${out.skip}` : ", sent"}`, { kind: "cycle", equity: snap.equity, orders: out.orders.length, skip: out.skip, live: ctl.live });
   } catch (err) {

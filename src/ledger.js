@@ -8,15 +8,22 @@ import { readJson, writeJson } from "./control.js";
 
 const isPerp = (coin) => typeof coin === "string" && !coin.startsWith("@") && !coin.includes("/");
 
-/** Fills since `since`, following Hyperliquid's 2000-per-page limit. */
-async function fillsSince(info, owner, since) {
+/**
+ * Every row in [since, until] from a time-ranged info endpoint. Hyperliquid caps each response
+ * (2000 fills, ~500 funding/ledger rows), so page forward from the newest time seen until a page
+ * brings nothing new. Rows are de-duplicated by `key`, so overlapping page edges are safe.
+ */
+export async function pageByTime(fetchPage, since, until, key) {
   const out = [], seen = new Set();
   let start = since;
-  for (let page = 0; page < 50; page++) {
-    const batch = await info.userFillsByTime({ user: owner, startTime: start });
-    for (const f of batch) { const k = `${f.tid}:${f.oid}`; if (!seen.has(k)) { seen.add(k); out.push(f); } }
-    if (batch.length < 2000) break;
-    start = Math.max(...batch.map((f) => f.time));
+  for (let page = 0; page < 100; page++) {
+    const batch = await fetchPage(start, until);
+    let added = 0;
+    for (const x of batch) { const k = key(x); if (!seen.has(k)) { seen.add(k); out.push(x); added++; } }
+    if (!added || !batch.length) break;
+    const last = Math.max(...batch.map((x) => x.time));
+    if (last <= start && page > 0) break;
+    start = last;
   }
   return out;
 }
@@ -85,20 +92,26 @@ export function summarize({ fills, funding, ledger, owner, unified, start, equit
 }
 
 /** The start point: data/pnl.json, created on the first call from the current equity. */
-export function pnlStart(equity, upnl) {
+export function pnlStart(equity, upnl, asOf = Date.now()) {
   const s = readJson(PATHS.pnl, null);
   if (s?.since > 0 && s.equity > 0) return s;
-  const fresh = { since: Date.now(), equity, upnl, note: "P&L start point. Edit since/equity to re-base." };
+  const fresh = { since: asOf, equity, upnl, note: "P&L start point. Edit since/equity to re-base." };
   writeJson(PATHS.pnl, fresh);
   return fresh;
 }
 
-export async function fetchPnl(info, owner, { equity, upnl, unified }) {
-  const start = pnlStart(equity, upnl);
+/**
+ * P&L as of `asOf`, the moment `equity`/`upnl` were read. Fills, funding and flows are bounded to
+ * the same moment, so this cycle's own orders (sent after the snapshot) count next cycle, when the
+ * equity reflects them too; otherwise a close would be counted both as realized and as stale uPnL.
+ */
+export async function fetchPnl(info, owner, { equity, upnl, unified, asOf = Date.now() }) {
+  const start = pnlStart(equity, upnl, asOf);
+  const ranged = (method, extra = {}) => (s, e) => info[method]({ user: owner, startTime: s, endTime: e, ...extra });
   const [fills, funding, ledger] = await Promise.all([
-    fillsSince(info, owner, start.since),
-    info.userFunding({ user: owner, startTime: start.since }),
-    info.userNonFundingLedgerUpdates({ user: owner, startTime: start.since }),
+    pageByTime(ranged("userFillsByTime"), start.since, asOf, (f) => `${f.tid}:${f.oid}`),
+    pageByTime(ranged("userFunding"), start.since, asOf, (x) => `${x.time}:${x.hash}:${x.delta?.coin}`),
+    pageByTime(ranged("userNonFundingLedgerUpdates"), start.since, asOf, (x) => `${x.time}:${x.hash}:${x.delta?.type}`),
   ]);
-  return summarize({ fills, funding, ledger, owner, unified, start, equity, upnl });
+  return { ...summarize({ fills, funding, ledger, owner, unified, start, equity, upnl, now: asOf }), asOf };
 }

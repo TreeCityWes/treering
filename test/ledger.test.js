@@ -51,3 +51,13 @@ test("unknown ledger types are reported, not silently counted", () => {
   assert.deepEqual(p.unknownLedgerTypes, ["rewardsClaim"]);
   assert.equal(p.residual, 1);
 });
+
+test("pageByTime follows pages past the per-response cap and de-duplicates edges", async () => {
+  const rows = Array.from({ length: 1234 }, (_, i) => ({ time: 1000 + Math.floor(i / 3), id: i })); // 3 rows share each ms
+  const calls = [];
+  const fetchPage = async (s, e) => { calls.push(s); return rows.filter((r) => r.time >= s && r.time <= e).slice(0, 500); };
+  const { pageByTime } = await import("../src/ledger.js");
+  const got = await pageByTime(fetchPage, 1000, 5000, (r) => r.id);
+  assert.equal(got.length, 1234);
+  assert.ok(calls.length >= 3 && calls.length <= 5, `calls ${calls.length}`);
+});

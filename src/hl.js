@@ -71,7 +71,11 @@ export async function snapshot(info, owner, markets) {
   // Unified account: the spot USDC total is already marked to market (it includes open perp P&L,
   // realized P&L, fees and funding) and equals the account value Hyperliquid's portfolio reports.
   // Adding unrealized P&L on top would count it twice.
-  if (mode === "unifiedAccount") equity = usdcSpot;
+  if (mode === "unifiedAccount") {
+    // Never size off a silently-missing balance: a zero here would trip the daily loss stop.
+    if (!spot.balances.some((b) => b.coin === "USDC")) throw new Error("unified account has no spot USDC balance; refusing to compute equity");
+    equity = usdcSpot;
+  }
   else equity = Number(main.marginSummary.accountValue) + Number(xyz?.marginSummary.accountValue ?? 0);
   return {
     mode, equity, positions, current,
