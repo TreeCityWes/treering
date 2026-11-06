@@ -2,7 +2,8 @@
 // Runs from a systemd timer, separate from the bot. Alerts once when the bot stops cycling
 // (process gone or no completed cycle for 2 intervals + 2 min), and once when it recovers.
 import { readState } from "./control.js";
-import { loadConfig } from "./config.js";
+import { statfsSync } from "node:fs";
+import { loadConfig, DATA_DIR } from "./config.js";
 import { notify, alertState, saveAlertState, money } from "./alerts.js";
 
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
@@ -31,4 +32,21 @@ if (down && !A.watchdogDown) {
   saveAlertState(A);
   await notify(`✅ Treering bot is cycling again (was down ~${mins} min).`);
 }
-console.log(down ? `DOWN: ${reason}` : `ok: last cycle ${Math.round(age / 1000)}s ago`);
+
+// Disk space: a full disk stops state/history writes. Alert at 85% used, all-clear below 80%.
+let disk = "";
+try {
+  const st = statfsSync(DATA_DIR);
+  const used = 1 - st.bavail / st.blocks, freeGb = (st.bavail * st.bsize) / 1e9;
+  disk = ` · disk ${(used * 100).toFixed(0)}% used`;
+  const B = alertState();
+  if (used >= 0.85 && !B.diskHigh) {
+    B.diskHigh = now; saveAlertState(B);
+    await notify(`💾 Disk is ${(used * 100).toFixed(0)}% full (${freeGb.toFixed(1)} GB free). The bot stops saving state and history if it fills up.`);
+  } else if (used < 0.8 && B.diskHigh) {
+    delete B.diskHigh; saveAlertState(B);
+    await notify(`✅ Disk back to ${(used * 100).toFixed(0)}% used (${freeGb.toFixed(1)} GB free).`);
+  }
+} catch (e) { disk = ` · disk check failed: ${e.message}`; }
+
+console.log((down ? `DOWN: ${reason}` : `ok: last cycle ${Math.round(age / 1000)}s ago`) + disk);
