@@ -38,7 +38,9 @@ export async function fetchSignal() {
   if (!Array.isArray(data.coins)) throw new Error("Signal API returned no coins");
   const coins = data.coins
     .filter((c) => c && typeof c.coin === "string" && (c.score === null || (Number.isFinite(c.score) && Math.abs(c.score) <= 100)))
-    .map((c) => ({ coin: c.coin, score: c.score, label: c.label, tradersLong: c.tradersLong, tradersShort: c.tradersShort, history: Array.isArray(c.history) ? c.history.map((h) => h[1]).filter(Number.isFinite) : [] }));
+    .map((c) => ({ coin: c.coin, score: c.score, label: c.label, tradersLong: c.tradersLong, tradersShort: c.tradersShort,
+      posScore: c.posScore, flowScore: c.flowScore, pctLong: c.pctLong, net: c.net, flow1h: c.flow1h, flow24h: c.flow24h, vol24h: c.vol24h, dominantShare: c.dominant?.share,
+      history: Array.isArray(c.history) ? c.history.map((h) => h[1]).filter(Number.isFinite) : [] }));
   const ts = data.ts ?? data.timestamp ?? data.now;
   return { coins, timestamp: typeof ts === "number" ? ts : null };
 }
@@ -65,9 +67,11 @@ export async function snapshot(info, owner, markets) {
   const current = {};
   for (const [coin, p] of Object.entries(positions)) current[coin] = p.szi * (Number(mids[coin]) || p.value / Math.abs(p.szi) || 0);
   const usdcSpot = Number(spot.balances.find((b) => b.coin === "USDC")?.total ?? 0);
-  const upnl = allPositions.reduce((n, p) => n + Number(p.unrealizedPnl), 0);
   let equity;
-  if (mode === "unifiedAccount") equity = usdcSpot + upnl;
+  // Unified account: the spot USDC total is already marked to market (it includes open perp P&L,
+  // realized P&L, fees and funding) and equals the account value Hyperliquid's portfolio reports.
+  // Adding unrealized P&L on top would count it twice.
+  if (mode === "unifiedAccount") equity = usdcSpot;
   else equity = Number(main.marginSummary.accountValue) + Number(xyz?.marginSummary.accountValue ?? 0);
   return {
     mode, equity, positions, current,

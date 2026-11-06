@@ -14,7 +14,8 @@ const actions = {
   run: () => updateControl({ runNow: true }),
   status: () => {
     const s = readState();
-    return { control: readControl(), equity: s?.equity, dayPnl: s?.dayPnl, lastCycle: s?.ts && new Date(s.ts).toISOString(), skip: s?.skip, error: s?.error, orders: s?.orders?.map((o) => `${o.tag} ${o.coin} ${o.isBuy ? "buy" : "sell"} ${o.sz} (~$${o.ntl.toFixed(2)})`) };
+    return { control: readControl(), equity: s?.equity, dayPnl: s?.dayPnl, lastCycle: s?.ts && new Date(s.ts).toISOString(),
+      pnl: s?.pnl && { since: new Date(s.pnl.since).toISOString(), startEquity: s.pnl.startEquity, total: +s.pnl.total.toFixed(2), pct: s.pnl.totalPct != null ? +s.pnl.totalPct.toFixed(2) : null, residual: +s.pnl.residual.toFixed(2) }, skip: s?.skip, error: s?.error, orders: s?.orders?.map((o) => `${o.tag} ${o.coin} ${o.isBuy ? "buy" : "sell"} ${o.sz} (~$${o.ntl.toFixed(2)})`) };
   },
 };
 try {

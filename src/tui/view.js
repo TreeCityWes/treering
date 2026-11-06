@@ -171,6 +171,7 @@ function kpiLine(m, W) {
   const items = [
     `${C.mute("equity")} ${bold(C.fg(usd(m.equity, { compact: true })))}`,
     `${C.mute("today")} ${bold(sgnCol(m.dayPnl)(usd(m.dayPnl, { sign: true, compact: true })))}${m.dayPct != null ? " " + sgnCol(m.dayPnl)(`${signed(Number(m.dayPct.toFixed(1)))}%`) : ""}`,
+    ...(m.s?.pnl ? [`${C.mute("since start")} ${bold(sgnCol(m.s.pnl.total)(usd(m.s.pnl.total, { sign: true, compact: true })))}${m.s.pnl.totalPct != null ? " " + sgnCol(m.s.pnl.total)(`${signed(Number(m.s.pnl.totalPct.toFixed(1)))}%`) : ""}`] : []),
     `${C.mute("stop room")} ${roomCol(m.s?.killed ? "HIT" : usd(m.room, { compact: true }))}`,
     `${C.mute("lev")} ${C.fg(m.levUsed != null ? `${m.levUsed.toFixed(2)}x` : "—")}`,
     `${C.mute("signal")} ${sigCol(m.sigAge == null ? (m.signalErr ? "error" : "…") : m.sigAge > m.maxAge ? "STALE" : dur(m.sigAge))}`,
@@ -178,7 +179,8 @@ function kpiLine(m, W) {
   const held = m.rows.filter((r) => Math.abs(r.current) > 0.005).length;
   if (m.s && held) { const rest = (m.s.stops ?? []).filter((x) => x.status === "resting").length; items.push(`${C.mute("stops")} ${(rest >= held ? C.up : C.warn)(`${rest}/${held}`)}`); }
   // Shed the least important items (leverage, then signal age) before anything is cut off.
-  for (const drop of [[], [3], [3, 4]]) {
+  const o = m.s?.pnl ? 1 : 0;
+  for (const drop of [[], [3 + o], [3 + o, 4 + o], [2, 3 + o, 4 + o]]) {
     const keep = items.filter((_, i) => !drop.includes(i));
     for (const sep of ["   ", "  ", " "]) { const out = " " + keep.join(sep); if (width(out) <= W) return out; }
   }
@@ -268,6 +270,7 @@ function actionLabel(r, m, w) {
   else if (a.includes("REDUCE")) { t = `${r.gap > 0 ? "▲ buy" : "▼ sell"} ${amt}${w >= 16 ? " trim" : ""}`; col = C.warn; }
   else if (a.includes("LOSS-STOP")) { t = "■ frozen: stop"; col = C.down; }
   else if (a.includes("HOLD") || hold) { t = r.current ? "═ hold, neutral" : "· flat, neutral"; col = C.mute; }
+  else if (r.small) { t = `≈ near target ${amt}`; col = C.mute; }
   else { t = "✓ on target"; col = C.mute; }
   return col(ell(t, w));
 }
@@ -387,6 +390,8 @@ function safetyBody(m, w) {
   if (m.s) {
     out.push(`${pad(C.mute("api wallet"), lw)}${tick(days > 0)} ${C.soft(days != null ? `valid ${days}d` : "not authorized")} ${C.mute(`· ${short(m.s.agent)}`)}`);
     out.push(`${pad(C.mute("builder fee"), lw)}${tick(m.s.builderFeeOk)} ${C.soft(m.s.builderFeeOk ? "approved" : "not approved")} ${C.mute(`· account ${m.s.mode ?? "—"}`)}`);
+    const p = m.s.pnl;
+    if (p) out.push(`${pad(C.mute("p&l since start"), lw)}${sgnCol(p.total)("●")} ${bold(sgnCol(p.total)(usd(p.total, { sign: true })))} ${C.mute(`since ${new Date(p.since).toISOString().slice(5, 10)} · realized`)} ${sgnCol(p.realized)(usd(p.realized, { sign: true }))} ${C.mute("· fees")} ${C.down(usd(-p.fees, { sign: true }))} ${C.mute("· open")} ${sgnCol(p.upnl)(usd(p.upnl, { sign: true }))}${Math.abs(p.residual) > Math.max(1, 0.01 * p.equity) ? C.warn(` · unreconciled ${usd(p.residual, { sign: true })}`) : ""}`);
     const spot = (m.s.spot ?? []).filter((b) => b.coin !== "USDC");
     if (spot.length) out.push(`${pad(C.mute("spot (ignored)"), lw)}${C.info("•")} ${C.soft(spot.map((b) => `${b.total} ${b.coin}`).join(", "))} ${C.mute("· not counted as perps equity")}`);
   }

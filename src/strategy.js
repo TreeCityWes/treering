@@ -12,6 +12,8 @@ export function findScore(signal, coin) {
  * target notional = equity × leverage ÷ markets × score/100
  * |score| < 15 or missing → hold current position unchanged.
  * killed (daily loss stop hit) → may reduce/close, never add or flip.
+ * Adds/trims to an open position smaller than cfg.rebalance (max of minGapUsd and minGapFrac ×
+ * position) are skipped and marked `small`, to avoid churning fees on noise.
  */
 export function targetRows({ equity, cfg, signal, current, killed = false }) {
   const perCoin = cfg.markets.length ? (equity * cfg.leverage) / cfg.markets.length : 0;
@@ -27,12 +29,15 @@ export function targetRows({ equity, cfg, signal, current, killed = false }) {
     }
     const gap = tgt - cur;
     const flip = cur !== 0 && tgt !== 0 && Math.sign(cur) !== Math.sign(tgt);
-    let actions;
+    const rb = cfg.rebalance ?? {};
+    const minGap = Math.max(rb.minGapUsd ?? 0, (rb.minGapFrac ?? 0) * Math.abs(cur));
+    let actions, small = false;
     if (hold) actions = [cur === 0 ? "SKIP" : "HOLD"];
     else if (cur !== 0 && (tgt === 0 || flip)) actions = [flip ? "FLIP-CLOSE" : "CLOSE", ...(flip && Math.abs(tgt) >= cfg.minOrderUsd && !killed ? ["FLIP-OPEN"] : [])];
     else if (Math.abs(gap) < cfg.minOrderUsd) actions = [killed && tgt !== raw ? "LOSS-STOP" : "SKIP"];
+    else if (!killed && cur !== 0 && Math.abs(gap) < minGap) { actions = ["SKIP"]; small = true; }
     else actions = [cur === 0 ? "OPEN" : Math.abs(tgt) > Math.abs(cur) ? "ADD" : "REDUCE"];
-    return { coin, score, label, current: cur, target: tgt, gap, actions };
+    return { coin, score, label, current: cur, target: tgt, gap, actions, ...(small ? { small: true } : {}) };
   });
 }
 

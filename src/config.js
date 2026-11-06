@@ -11,6 +11,8 @@ export const PATHS = {
   control: join(DATA_DIR, "control.json"),
   stops: join(DATA_DIR, "stops.json"),
   log: join(DATA_DIR, "events.jsonl"),
+  pnl: join(DATA_DIR, "pnl.json"),
+  history: join(DATA_DIR, "history"),
 };
 
 export const SIGNAL_URL = "https://wxnt-sale-sim.vercel.app/api/daytraders?view=sent";
@@ -32,6 +34,9 @@ export const DEFAULT_CONFIG = {
   slippage: 0.01,
   maxSignalAgeSec: 600,
   builderFee: true,
+  // Skip small adds/trims to an existing position: trade only when the gap to target is at least
+  // minGapUsd AND at least minGapFrac of the position. Opens, closes and flips are never filtered.
+  rebalance: { minGapUsd: 15, minGapFrac: 0.2 },
   // Protective stops, as in the X1 copybot whitepaper (Blue Bear's settings).
   stops: {
     enabled: true,
@@ -63,7 +68,10 @@ export function loadCredentials() {
 
 export function loadConfig() {
   const user = existsSync(PATHS.config) ? JSON.parse(readFileSync(PATHS.config, "utf8")) : {};
-  const cfg = { ...DEFAULT_CONFIG, ...user, stops: { ...DEFAULT_CONFIG.stops, ...(user.stops ?? {}) } };
+  const cfg = { ...DEFAULT_CONFIG, ...user, stops: { ...DEFAULT_CONFIG.stops, ...(user.stops ?? {}) }, rebalance: { ...DEFAULT_CONFIG.rebalance, ...(user.rebalance ?? {}) } };
+  const rb = cfg.rebalance;
+  if (!(rb.minGapUsd >= 0 && rb.minGapUsd <= 1e6)) throw new Error("config.rebalance.minGapUsd must be >= 0");
+  if (!(rb.minGapFrac >= 0 && rb.minGapFrac < 1)) throw new Error("config.rebalance.minGapFrac must be in [0, 1)");
   const st = cfg.stops;
   if (!(st.stopLossPct > 0 && st.stopLossPct <= 0.5)) throw new Error("config.stops.stopLossPct must be in (0, 0.5]");
   if (!(st.stopSlippage > 0 && st.stopSlippage <= 0.2)) throw new Error("config.stops.stopSlippage must be in (0, 0.2]");

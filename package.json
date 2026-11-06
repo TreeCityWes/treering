@@ -12,7 +12,8 @@
     "tui": "node src/tui.js",
     "once": "node src/bot.js --once",
     "test": "node --test test/",
-    "watch": "watch -c -t -n 2 node src/tui.js --plain"
+    "watch": "watch -c -t -n 2 node src/tui.js --plain",
+    "pnl": "node src/report.js"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "0.32.2",

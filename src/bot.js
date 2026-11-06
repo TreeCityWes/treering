@@ -8,6 +8,8 @@ import { readControl, updateControl, readState, readJson, writeJson, logEvent } 
 import { detectStopFills, syncStops, cancelAllStops } from "./stops.js";
 import { X1_BUILDER } from "./config.js";
 import { notify, alertsEnabled, alertState, saveAlertState, money } from "./alerts.js";
+import { fetchPnl } from "./ledger.js";
+import { recordCycle } from "./history.js";
 
 const once = process.argv.includes("--once");
 const MIN_EQUITY = 15;
@@ -30,8 +32,10 @@ function dailySummary(prev, out) {
   const pos = Object.entries(out.positions ?? {}).filter(([, p]) => Math.abs(p.szi) > 0)
     .map(([c, p]) => `${c} ${p.szi > 0 ? "long" : "short"} ${money(Math.abs(p.value ?? 0))} (uPnL ${money(p.upnl, true)})`);
   const stops = (out.stops ?? []).filter((x) => x.status === "resting").length;
+  const p = out.pnl ?? prev.pnl;
+  const since = p ? `Since ${new Date(p.since).toISOString().slice(0, 10)}: ${money(p.total, true)}${p.totalPct != null ? ` (${p.totalPct >= 0 ? "+" : ""}${p.totalPct.toFixed(2)}%)` : ""} · realized ${money(p.realized, true)} · fees ${money(-p.fees, true)} (X1 ${money(-p.builderFees, true)}) · funding ${money(p.funding, true)} · open ${money(p.upnl, true)} · ${p.trades} fills` : null;
   return [`📊 Treering daily summary for ${prev.day} (UTC)`, `Equity ${money(prev.dayStart)} → ${money(prev.equity)}  (${money(pnl, true)}, ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`,
-    `Mode: ${out.live ? "LIVE" : "dry-run"}${out.paused ? ", paused" : ""}`, pos.length ? `Positions:\n${pos.join("\n")}` : "No open positions", `Stops resting: ${stops}/${pos.length}`].join("\n");
+    `Mode: ${out.live ? "LIVE" : "dry-run"}${out.paused ? ", paused" : ""}`, pos.length ? `Positions:\n${pos.join("\n")}` : "No open positions", `Stops resting: ${stops}/${pos.length}`, since].filter(Boolean).join("\n");
 }
 
 async function alertsFor(prev, out, stopEvents) {
@@ -60,6 +64,12 @@ async function alertsFor(prev, out, stopEvents) {
   if (missing && !A.stopsMissing) { A.stopsMissing = true; msgs.push(`⚠️ Only ${resting}/${held} positions have a stop-loss resting on the exchange`); }
   else if (!missing && A.stopsMissing && !out.error) { A.stopsMissing = false; msgs.push(`✅ All ${held} positions have resting stops again`); }
   if (prev.day && out.day && prev.day !== out.day) msgs.push(dailySummary(prev, out));
+  // P&L that doesn't reconcile means an untracked flow (a spot sale, a transfer type we don't parse) or a bug.
+  const p = out.pnl;
+  if (p && !out.pnlError && Math.abs(p.residual) > Math.max(1, 0.01 * p.equity) && A.pnlWarned !== today) {
+    A.pnlWarned = today;
+    msgs.push(`⚠️ P&L doesn't reconcile: equity change ${money(p.total, true)} vs fills/fees/funding/open ${money(p.explained, true)} (gap ${money(p.residual, true)}).${p.unknownLedgerTypes.length ? ` Unparsed ledger types: ${p.unknownLedgerTypes.join(", ")}.` : ""} Check for transfers or spot trades.`);
+  }
   saveAlertState(A);
   for (const m of msgs) await notify(m);
 }
@@ -77,7 +87,7 @@ async function cycle(reason) {
   const ctl = readControl();
   const started = Date.now();
   const stopEvents = [];
-  const out = { ts: started, pid: process.pid, network, owner: creds.owner, agent, live: ctl.live, paused: ctl.paused, reason, cfg, skip: null, error: null, rows: [], orders: [], fills: [] };
+  const out = { ts: started, pid: process.pid, network, owner: creds.owner, agent, live: ctl.live, paused: ctl.paused, reason, cfg, skip: null, error: null, pnl: null, pnlError: null, rows: [], orders: [], fills: [] };
   try {
     const [snap, signal] = await Promise.all([snapshot(info, creds.owner, markets), fetchSignal()]);
     const me = snap.agents.find((a) => a.address.toLowerCase() === agent.toLowerCase());
@@ -135,6 +145,11 @@ async function cycle(reason) {
     }
     out.blocks = book.blocks;
     saveBook();
+    // Running P&L since the start point in data/pnl.json. A failure here never fails the cycle.
+    try {
+      const upnl = Object.values(snap.positions).reduce((n, p) => n + (p.upnl || 0), 0);
+      out.pnl = await fetchPnl(info, creds.owner, { equity: snap.equity, upnl, unified: snap.mode === "unifiedAccount" });
+    } catch (e) { out.pnlError = e.message ?? String(e); out.pnl = state.pnl ?? null; }
     if (ctl.flatten) { updateControl({ flatten: false, paused: true }); out.paused = true; say(out.skip ? `flatten requested but not sent: ${out.skip}` : "flatten done; bot paused", { kind: "control" }); }
     say(`cycle: equity $${snap.equity.toFixed(2)}, ${out.orders.length} order(s)${out.skip ? `, not sent: ${out.skip}` : ", sent"}`, { kind: "cycle", equity: snap.equity, orders: out.orders.length, skip: out.skip, live: ctl.live });
   } catch (err) {
@@ -145,8 +160,9 @@ async function cycle(reason) {
   out.durationMs = Date.now() - started;
   out.nextCycleAt = once ? null : Date.now() + cfg.intervalSec * 1000;
   const prev = state;
-  state = { ...state, ...out, day: out.day ?? state.day, dayStart: out.dayStart ?? state.dayStart };
+  state = { ...state, ...out, day: out.day ?? state.day, dayStart: out.dayStart ?? state.dayStart, pnl: out.pnl ?? state.pnl ?? null };
   writeJson(PATHS.state, state);
+  try { recordCycle(out); } catch (e) { console.error(`history: ${e.message}`); }
   await alertsFor(prev, out, stopEvents).catch((e) => console.error(`alerts: ${e.message}`));
 }
 

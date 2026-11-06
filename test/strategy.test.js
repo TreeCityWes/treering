@@ -95,3 +95,28 @@ test("full closes are exempt from the minimum", () => {
   const [o] = buildOrders(rows, { markets: { SOL: { asset: 5, szDecimals: 2 } }, mids: { SOL: 95 }, positions: { SOL: { szi: -0.05 } }, slippage: 0.01, minOrderUsd: 10 });
   assert.equal(o.sz, "0.05");
 });
+
+test("rebalance filter skips small adds/trims but never opens, closes or flips", () => {
+  const c = { ...cfg, rebalance: { minGapUsd: 15, minGapFrac: 0.2 } };
+  // BTC target −31: current −20 → gap −11 (< $15) skip; ZEC target 60: current 48 → gap 12 skip
+  let by = Object.fromEntries(targetRows({ equity: 100, cfg: c, signal, current: { BTC: -20, ZEC: 48 } }).map((r) => [r.coin, r]));
+  assert.deepEqual(by.BTC.actions, ["SKIP"]); assert.equal(by.BTC.small, true);
+  assert.deepEqual(by.ZEC.actions, ["SKIP"]); assert.equal(by.ZEC.small, true);
+  // gap $16 but under 20% of a $100 position → still skipped; gap $25 on $100 → trades
+  const big = { coins: [{ coin: "BTC", score: -84 }, { coin: "ETH", score: 75 }, { coin: "ZEC", score: 60 }] };
+  by = Object.fromEntries(targetRows({ equity: 100, cfg: c, signal: big, current: { BTC: -100, ETH: 100 } }).map((r) => [r.coin, r]));
+  assert.deepEqual(by.BTC.actions, ["SKIP"]);   // gap +16 < 20
+  assert.deepEqual(by.ETH.actions, ["REDUCE"]); // gap −25 ≥ 20
+  // opens and flips are not filtered, even when small
+  by = Object.fromEntries(targetRows({ equity: 100, cfg: c, signal, current: { ZEC: -12 } }).map((r) => [r.coin, r]));
+  assert.deepEqual(by.BTC.actions, ["OPEN"]);
+  assert.deepEqual(by.ZEC.actions, ["FLIP-CLOSE", "FLIP-OPEN"]);
+  // without the config the old behaviour is unchanged
+  assert.deepEqual(targetRows({ equity: 100, cfg, signal, current: { BTC: -20 } }).find((r) => r.coin === "BTC").actions, ["ADD"]);
+});
+
+test("rebalance filter is off while the daily loss stop is hit, so reductions still go through", () => {
+  const c = { ...cfg, rebalance: { minGapUsd: 15, minGapFrac: 0.2 } };
+  const r = targetRows({ equity: 100, cfg: c, signal, current: { ZEC: 72 }, killed: true }).find((x) => x.coin === "ZEC");
+  assert.deepEqual(r.actions, ["REDUCE"]); // gap −12 would be "small" but killed exempts it
+});
