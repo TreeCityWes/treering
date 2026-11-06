@@ -1,7 +1,7 @@
 // Append-only record of every cycle, one JSON line each, in data/history/YYYY-MM-DD.jsonl (UTC).
 // It keeps what a later backtest or review needs: the full Mood Ring reading (all coins, not only
-// traded ones), positions, prices, targets, orders, fills, stops and P&L. ~1.5 KB per cycle,
-// about 0.5 MB a day at the default 5-minute interval.
+// traded ones), positions, prices, targets, orders, fills, stops and P&L. ~6 KB per cycle,
+// about 1.7 MB a day at the default 5-minute interval.
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATHS, DEADBAND } from "./config.js";
