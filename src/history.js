@@ -12,14 +12,14 @@ export function historyRecord(out) {
   return {
     ts: out.ts, v: 1, reason: out.reason, live: out.live, paused: out.paused, durationMs: out.durationMs, mode: out.mode ?? null,
     // The settings in force, so a later replay knows what produced each decision.
-    cfg: out.cfg ? { leverage: out.cfg.leverage, markets: out.cfg.markets, killPct: out.cfg.killPct, minOrderUsd: out.cfg.minOrderUsd, slippage: out.cfg.slippage, deadband: DEADBAND, rebalance: out.cfg.rebalance, stops: out.cfg.stops, builderFee: out.cfg.builderFee } : null,
+    cfg: out.cfg ? { leverage: out.cfg.leverage, markets: out.cfg.markets, killPct: out.cfg.killPct, minOrderUsd: out.cfg.minOrderUsd, slippage: out.cfg.slippage, deadband: DEADBAND, rebalance: out.cfg.rebalance, flipMinScore: out.cfg.flipMinScore, stops: out.cfg.stops, builderFee: out.cfg.builderFee } : null,
     equity: r(out.equity, 4), dayStart: r(out.dayStart, 4), dayPnl: r(out.dayPnl, 4), killed: out.killed ?? null,
     pnl: out.pnl ? { total: r(out.pnl.total, 4), realized: r(out.pnl.realized, 4), fees: r(out.pnl.fees, 4), funding: r(out.pnl.funding, 4), upnl: r(out.pnl.upnl, 4), residual: r(out.pnl.residual, 4), ...(out.pnlError ? { error: out.pnlError } : {}), ...(out.pnl.stale ? { stale: true } : {}) } : null,
     signalTs: out.signal?.timestamp ?? null,
     signal: out.signal?.coins ?? null,
     mids: out.mids ? Object.fromEntries(out.cfg.markets.filter((c) => out.mids[c] != null).map((c) => [c, Number(out.mids[c])])) : null,
     positions: out.positions ? Object.fromEntries(Object.entries(out.positions).filter(([, p]) => p.szi).map(([c, p]) => [c, { szi: p.szi, entryPx: p.entryPx, upnl: r(p.upnl, 4), value: r(p.value, 4) }])) : null,
-    plan: out.rows?.length ? Object.fromEntries(out.rows.map((x) => [x.coin, { score: x.score, current: r(x.current, 2), target: r(x.target, 2), actions: x.actions, ...(x.small ? { small: true } : {}) }])) : null,
+    plan: out.rows?.length ? Object.fromEntries(out.rows.map((x) => [x.coin, { score: x.score, current: r(x.current, 2), target: r(x.target, 2), actions: x.actions, ...(x.small ? { small: true } : {}), ...(x.flipHeld ? { flipHeld: true } : {}) }])) : null,
     orders: out.orders?.map((o) => ({ coin: o.coin, tag: o.tag, isBuy: o.isBuy, sz: o.sz, px: o.px })) ?? [],
     fills: out.fills?.map((f) => ({ coin: f.coin, tag: f.tag, filled: f.filled ?? null, avgPx: f.avgPx ?? null, error: f.error ?? null })) ?? [],
     stops: out.stops?.map((s) => ({ coin: s.coin, side: s.side, size: s.size, entry: s.entry, stopPx: s.stopPx ?? null, best: s.best ?? null, armed: !!s.armed, status: s.status })) ?? null,

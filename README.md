@@ -13,7 +13,7 @@ A self-hosted trading bot for [Hyperliquid](https://hyperliquid.xyz) that follow
 Every 5 minutes the bot:
 
 1. Reads the public Mood Ring scores and your account state from Hyperliquid.
-2. Sizes a target for each market: `equity × leverage ÷ markets × score/100`. Scores inside ±15 hold the current position. Gaps under $10 are skipped.
+2. Sizes a target for each market: `equity × leverage ÷ markets × score/100`. Scores inside ±15 hold the current position. Reversing an open position needs |score| ≥ 25 (`flipMinScore`), so a weak opposite score holds instead of flipping. Gaps under $10 are skipped, and adds/trims under max($15, 20% of the position) are skipped as churn.
 3. Sends the difference as IOC limit orders 1% through mid (closes before opens). Nothing is sent until you turn **live** on.
 4. Keeps exactly one reduce-only stop-market order resting on Hyperliquid for every open position.
 

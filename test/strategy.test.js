@@ -120,3 +120,29 @@ test("rebalance filter is off while the daily loss stop is hit, so reductions st
   const r = targetRows({ equity: 100, cfg: c, signal, current: { ZEC: 72 }, killed: true }).find((x) => x.coin === "ZEC");
   assert.deepEqual(r.actions, ["REDUCE"]); // gap −12 would be "small" but killed exempts it
 });
+
+test("flip hysteresis: a weak opposite score holds, a strong one flips", () => {
+  const c = { ...cfg, flipMinScore: 25 };
+  const weak = { coins: [{ coin: "BTC", score: -18 }, { coin: "ETH", score: 10 }, { coin: "ZEC", score: 24 }] };
+  const rows = targetRows({ equity: 100, cfg: c, signal: weak, current: { BTC: 30, ZEC: -40 } });
+  const by = Object.fromEntries(rows.map((r) => [r.coin, r]));
+  assert.deepEqual(by.BTC.actions, ["HOLD"]);
+  assert.equal(by.BTC.target, 30);
+  assert.equal(by.BTC.flipHeld, true);
+  assert.deepEqual(by.ZEC.actions, ["HOLD"]);
+  // at the threshold it flips
+  const strong = { coins: [{ coin: "BTC", score: -25 }, { coin: "ETH", score: 0 }, { coin: "ZEC", score: 60 }] };
+  const r2 = targetRows({ equity: 100, cfg: c, signal: strong, current: { BTC: 30 } });
+  assert.deepEqual(r2.find((r) => r.coin === "BTC").actions, ["FLIP-CLOSE", "FLIP-OPEN"]);
+});
+
+test("flip hysteresis never blocks opens, same-side sizing, or loss-stop closes", () => {
+  const c = { ...cfg, flipMinScore: 25 };
+  const sig = { coins: [{ coin: "BTC", score: -18 }, { coin: "ETH", score: 20 }, { coin: "ZEC", score: 20 }] };
+  const by = Object.fromEntries(targetRows({ equity: 100, cfg: c, signal: sig, current: { ETH: 50 } }).map((r) => [r.coin, r]));
+  assert.deepEqual(by.BTC.actions, ["OPEN"]);       // flat → open at weak score is unchanged
+  assert.deepEqual(by.ETH.actions, ["REDUCE"]);     // same side → normal resize
+  assert.equal(by.ETH.flipHeld, undefined);
+  const killed = targetRows({ equity: 100, cfg: c, signal: sig, current: { BTC: 30 }, killed: true });
+  assert.deepEqual(killed.find((r) => r.coin === "BTC").actions, ["CLOSE"]);
+});

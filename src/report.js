@@ -21,6 +21,7 @@ const activity = {
   firstRecord: hist[0] ? new Date(hist[0].ts).toISOString() : null,
   cyclesWithOrders: hist.filter((h) => h.fills?.length).length,
   smallSkips: hist.reduce((n, h) => n + Object.values(h.plan ?? {}).filter((r) => r.small).length, 0),
+  flipHolds: hist.reduce((n, h) => n + Object.values(h.plan ?? {}).filter((r) => r.flipHeld).length, 0),
   errors: hist.filter((h) => h.error).length,
   maxEquity: hist.length ? hist.reduce((m, h) => Math.max(m, h.equity ?? -Infinity), -Infinity) : null,
   minEquity: hist.length ? hist.reduce((m, h) => Math.min(m, h.equity ?? Infinity), Infinity) : null,
@@ -42,5 +43,5 @@ console.log("  " + row(["coin", "realized", "fees", "funding", "open", "net", "f
 for (const [c, x] of Object.entries(p.byCoin).sort((a, b) => (b[1].realized - b[1].fees + b[1].funding + b[1].upnl) - (a[1].realized - a[1].fees + a[1].funding + a[1].upnl)))
   console.log("  " + row([c, $(x.realized), $(-x.fees), $(x.funding), $(x.upnl), $(x.realized - x.fees + x.funding + x.upnl), x.fills, `$${x.volume.toFixed(0)}`], w));
 console.log(`\n  ${p.trades} fills · $${p.volume.toFixed(0)} volume · fees ${((p.fees / (p.volume || 1)) * 100).toFixed(3)}% of volume`);
-if (activity.cycles) console.log(`  history: ${activity.cycles} cycles since ${activity.firstRecord.slice(0, 16)}, ${activity.cyclesWithOrders} traded, ${activity.smallSkips} small trades skipped, ${activity.errors} errors, equity range $${activity.minEquity.toFixed(2)}–$${activity.maxEquity.toFixed(2)}`);
+if (activity.cycles) console.log(`  history: ${activity.cycles} cycles since ${activity.firstRecord.slice(0, 16)}, ${activity.cyclesWithOrders} traded, ${activity.smallSkips} small trades skipped, ${activity.flipHolds} weak flips held, ${activity.errors} errors, equity range $${activity.minEquity.toFixed(2)}–$${activity.maxEquity.toFixed(2)}`);
 else console.log("  history: no cycle records yet (data/history/ fills in as the bot runs)");

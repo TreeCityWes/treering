@@ -12,6 +12,8 @@ export function findScore(signal, coin) {
  * target notional = equity × leverage ÷ markets × score/100
  * |score| < 15 or missing → hold current position unchanged.
  * killed (daily loss stop hit) → may reduce/close, never add or flip.
+ * Flip hysteresis: reversing an open position needs |score| >= cfg.flipMinScore; a weaker opposite
+ * score holds the position (`flipHeld`). Not applied while the loss stop is hit, so it can still close.
  * Adds/trims to an open position smaller than cfg.rebalance (max of minGapUsd and minGapFrac ×
  * position) are skipped and marked `small`, to avoid churning fees on noise.
  */
@@ -19,8 +21,10 @@ export function targetRows({ equity, cfg, signal, current, killed = false }) {
   const perCoin = cfg.markets.length ? (equity * cfg.leverage) / cfg.markets.length : 0;
   return cfg.markets.map((coin) => {
     const { score, label } = findScore(signal, coin);
-    const hold = score === null || Math.abs(score) < DEADBAND;
     const cur = current[coin] ?? 0;
+    const weakFlip = !killed && score !== null && Math.abs(score) >= DEADBAND && cur !== 0
+      && Math.sign(score) !== Math.sign(cur) && Math.abs(score) < (cfg.flipMinScore ?? 0);
+    const hold = score === null || Math.abs(score) < DEADBAND || weakFlip;
     const raw = hold ? cur : perCoin * (score / 100);
     let tgt = raw;
     if (killed && !hold) {
@@ -37,7 +41,7 @@ export function targetRows({ equity, cfg, signal, current, killed = false }) {
     else if (Math.abs(gap) < cfg.minOrderUsd) actions = [killed && tgt !== raw ? "LOSS-STOP" : "SKIP"];
     else if (!killed && cur !== 0 && Math.abs(gap) < minGap) { actions = ["SKIP"]; small = true; }
     else actions = [cur === 0 ? "OPEN" : Math.abs(tgt) > Math.abs(cur) ? "ADD" : "REDUCE"];
-    return { coin, score, label, current: cur, target: tgt, gap, actions, ...(small ? { small: true } : {}) };
+    return { coin, score, label, current: cur, target: tgt, gap, actions, ...(small ? { small: true } : {}), ...(weakFlip ? { flipHeld: true } : {}) };
   });
 }
 

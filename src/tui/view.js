@@ -270,6 +270,7 @@ function actionLabel(r, m, w) {
   else if (a.includes("ADD")) { t = `${r.gap > 0 ? "▲ buy" : "▼ sell"} ${amt}${w >= 16 ? " add" : ""}`; col = C.info; }
   else if (a.includes("REDUCE")) { t = `${r.gap > 0 ? "▲ buy" : "▼ sell"} ${amt}${w >= 16 ? " trim" : ""}`; col = C.warn; }
   else if (a.includes("LOSS-STOP")) { t = "■ frozen: stop"; col = C.down; }
+  else if (r.flipHeld) { t = "═ hold, flip too weak"; col = C.mute; }
   else if (a.includes("HOLD") || hold) { t = r.current ? "═ hold, neutral" : "· flat, neutral"; col = C.mute; }
   else if (r.small) { t = `≈ near target ${amt}`; col = C.mute; }
   else { t = "✓ on target"; col = C.mute; }
