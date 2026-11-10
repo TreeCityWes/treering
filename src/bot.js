@@ -26,6 +26,8 @@ let state = readState() ?? {};
 const book = { trail: {}, oids: {}, blocks: {}, ...readJson(PATHS.stops, {}) };
 const saveBook = () => writeJson(PATHS.stops, book);
 const A = alertState();
+// Keys that belonged to the watchdog when it shared this file; it has its own state file now.
+delete A.watchdogDown; delete A.diskHigh;
 
 function dailySummary(prev, out) {
   const pnl = (prev.equity ?? 0) - (prev.dayStart ?? prev.equity ?? 0), pct = prev.dayStart ? (pnl / prev.dayStart) * 100 : 0;

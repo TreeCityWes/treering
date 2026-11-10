@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 // Runs from a systemd timer, separate from the bot. Alerts once when the bot stops cycling
 // (process gone or no completed cycle for 2 intervals + 2 min), and once when it recovers.
-import { readState } from "./control.js";
+import { readState, readJson, writeJson } from "./control.js";
 import { statfsSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig, DATA_DIR } from "./config.js";
-import { notify, alertState, saveAlertState, money } from "./alerts.js";
+import { notify, money } from "./alerts.js";
+
+// The watchdog keeps its own state file. It used to share alerts.json with the bot, which loads that
+// file once and rewrites it every cycle: a flag set here just before a bot start was picked up by
+// the bot and written back after every clear, so the "cycling again" message repeated every run.
+const WD_STATE = join(DATA_DIR, "watchdog.json");
+const alertState = () => readJson(WD_STATE, {});
+const saveAlertState = (s) => writeJson(WD_STATE, s);
 
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
 const cfg = loadConfig();
