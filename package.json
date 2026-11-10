@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@nktkas/hyperliquid": "0.32.2",
-    "viem": "2.52.2"
+    "viem": "2.57.16"
   },
   "license": "MIT",
   "repository": {

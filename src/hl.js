@@ -31,18 +31,33 @@ export async function loadMarkets(info, coins) {
   return out;
 }
 
+/**
+ * Shape the signal payload. `timestamp` is when the scores were last computed: the newest point in
+ * the per-coin history, which the API appends about every 3 minutes. The payload's `now` is only
+ * the server clock at request time, so it would look fresh even if the feed had frozen; it is the
+ * fallback (`timestampFrom: "server"`) when the payload carries no history.
+ */
+export function parseSignal(data) {
+  if (!Array.isArray(data?.coins)) throw new Error("Signal API returned no coins");
+  let dataTs = 0;
+  const coins = data.coins
+    .filter((c) => c && typeof c.coin === "string" && (c.score === null || (Number.isFinite(c.score) && Math.abs(c.score) <= 100)))
+    .map((c) => {
+      const hist = Array.isArray(c.history) ? c.history.filter((h) => Array.isArray(h)) : [];
+      for (const h of hist) if (Number.isFinite(h[0]) && h[0] > dataTs) dataTs = h[0];
+      return { coin: c.coin, score: c.score, label: c.label, tradersLong: c.tradersLong, tradersShort: c.tradersShort,
+        posScore: c.posScore, flowScore: c.flowScore, pctLong: c.pctLong, net: c.net, flow1h: c.flow1h, flow24h: c.flow24h, vol24h: c.vol24h, dominantShare: c.dominant?.share,
+        history: hist.map((h) => h[1]).filter(Number.isFinite) };
+    });
+  const now = data.ts ?? data.timestamp ?? data.now;
+  const serverNow = typeof now === "number" ? now : null;
+  return { coins, timestamp: dataTs || serverNow, serverNow, timestampFrom: dataTs ? "history" : "server" };
+}
+
 export async function fetchSignal() {
   const res = await fetch(SIGNAL_URL, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`Signal API HTTP ${res.status}`);
-  const data = await res.json();
-  if (!Array.isArray(data.coins)) throw new Error("Signal API returned no coins");
-  const coins = data.coins
-    .filter((c) => c && typeof c.coin === "string" && (c.score === null || (Number.isFinite(c.score) && Math.abs(c.score) <= 100)))
-    .map((c) => ({ coin: c.coin, score: c.score, label: c.label, tradersLong: c.tradersLong, tradersShort: c.tradersShort,
-      posScore: c.posScore, flowScore: c.flowScore, pctLong: c.pctLong, net: c.net, flow1h: c.flow1h, flow24h: c.flow24h, vol24h: c.vol24h, dominantShare: c.dominant?.share,
-      history: Array.isArray(c.history) ? c.history.map((h) => h[1]).filter(Number.isFinite) : [] }));
-  const ts = data.ts ?? data.timestamp ?? data.now;
-  return { coins, timestamp: typeof ts === "number" ? ts : null };
+  return parseSignal(await res.json());
 }
 
 /** Everything a cycle needs about the owner account, read with public info calls. */
@@ -79,6 +94,7 @@ export async function snapshot(info, owner, markets) {
   else equity = Number(main.marginSummary.accountValue) + Number(xyz?.marginSummary.accountValue ?? 0);
   return {
     mode, equity, positions, current,
+    allMids: mids, // every market on the dexes read (raw strings), for recording prices of untraded signal coins
     mids: Object.fromEntries(Object.keys(markets).map((c) => [c, Number(mids[c])])),
     spot: spot.balances.map((b) => ({ coin: b.coin, total: Number(b.total) })).filter((b) => b.total > 0),
     agents: agents.map((a) => ({ name: a.name, address: a.address, validUntil: a.validUntil })),

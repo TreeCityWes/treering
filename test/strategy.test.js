@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { targetRows, buildOrders, formatPrice, formatSize } from "../src/strategy.js";
+import { targetRows, buildOrders, drawdownCheck, formatPrice, formatSize } from "../src/strategy.js";
 
 const cfg = { leverage: 3, minOrderUsd: 10, markets: ["BTC", "ETH", "ZEC"] };
 const signal = { coins: [{ coin: "BTC", score: -31 }, { coin: "ETH", score: 10 }, { coin: "ZEC", score: 60 }] };
@@ -145,4 +145,21 @@ test("flip hysteresis never blocks opens, same-side sizing, or loss-stop closes"
   assert.equal(by.ETH.flipHeld, undefined);
   const killed = targetRows({ equity: 100, cfg: c, signal: sig, current: { BTC: 30 }, killed: true });
   assert.deepEqual(killed.find((r) => r.coin === "BTC").actions, ["CLOSE"]);
+});
+
+test("drawdown check tracks the high-water mark and trips at the limit", () => {
+  assert.deepEqual(drawdownCheck(undefined, 100, 0.15), { peak: 100, dd: 0, hit: false }); // first reading
+  assert.equal(drawdownCheck(100, 120, 0.15).peak, 120);                                    // new high
+  const down = drawdownCheck(120, 105, 0.15);
+  assert.equal(down.peak, 120);
+  assert.ok(Math.abs(down.dd - 0.125) < 1e-12);
+  assert.equal(down.hit, false);
+  assert.equal(drawdownCheck(120, 102, 0.15).hit, true);                                    // exactly 15%
+  assert.equal(drawdownCheck(120, 60, 0).hit, false);                                       // 0 = off
+});
+
+test("no signal: every row holds and nothing is ordered", () => {
+  const rows = targetRows({ equity: 100, cfg: { ...cfg, flipMinScore: 25 }, signal: { coins: [] }, current: { BTC: -30, ZEC: 40 } });
+  assert.deepEqual(rows.map((r) => r.actions[0]), ["HOLD", "SKIP", "HOLD"]);
+  assert.deepEqual(buildOrders(rows, { markets, mids, positions: { BTC: { szi: -0.000375 }, ZEC: { szi: 0.1 } }, slippage: 0.01, minOrderUsd: 10 }), []);
 });

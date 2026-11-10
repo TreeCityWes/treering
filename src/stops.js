@@ -65,8 +65,9 @@ const isOurStop = (o) => o.isTrigger && o.reduceOnly && /Stop/.test(o.orderType 
 /**
  * Detect stops that filled since the last check and update blocks.
  * book: persisted {trail, oids, blocks, lastCheck}. Returns events for logging.
+ * `signal` may be the last known reading when the live fetch failed; pass canRelease: false then.
  */
-export async function detectStopFills({ info, owner, book, positions, signal, sc, now }) {
+export async function detectStopFills({ info, owner, book, positions, signal, sc, now, canRelease = true }) {
   const events = [];
   const since = book.lastCheck ?? now - 3600_000;
   const watched = Object.entries(book.oids ?? {});
@@ -84,7 +85,9 @@ export async function detectStopFills({ info, owner, book, positions, signal, sc
       }
     }
   }
-  for (const [coin, block] of Object.entries(book.blocks)) {
+  // Blocks are only lifted on a fresh reading: when the signal could not be fetched (canRelease
+  // false) a missing score means "unknown", not "left the signal".
+  if (canRelease) for (const [coin, block] of Object.entries(book.blocks)) {
     const score = signal.coins.find((c) => c.coin === coin || c.coin === coin.split(":").at(-1))?.score ?? null;
     const why = releaseReason(block, score, sc);
     if (why) { delete book.blocks[coin]; events.push({ kind: "control", msg: `re-entry block lifted on ${coin}: ${why}` }); }

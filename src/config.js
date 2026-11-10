@@ -26,6 +26,9 @@ export const DEFAULT_CONFIG = {
   network: "mainnet",
   leverage: 3,
   killPct: 0.1,
+  // Drawdown stop: pause the bot (positions keep their stops) when equity falls this far below its
+  // highest value seen. The daily loss stop resets every UTC midnight; this one does not. 0 = off.
+  maxDrawdownPct: 0.15,
   minOrderUsd: 10,
   // xyz markets are left out by default: in "default" account mode they need
   // USDC moved onto the xyz dex, which an API wallet cannot do.
@@ -82,6 +85,7 @@ export function loadConfig() {
   if (!(st.trailArmPct > 0 && st.trailPct > 0 && st.trailPct <= 0.5)) throw new Error("config.stops trail settings must be positive");
   if (!Number.isInteger(cfg.leverage) || cfg.leverage < 1 || cfg.leverage > 5) throw new Error("config.leverage must be an integer 1-5");
   if (!(cfg.killPct > 0 && cfg.killPct <= 0.5)) throw new Error("config.killPct must be in (0, 0.5]");
+  if (!(cfg.maxDrawdownPct >= 0 && cfg.maxDrawdownPct <= 0.9)) throw new Error("config.maxDrawdownPct must be in [0, 0.9] (0 = off)");
   if (!(cfg.minOrderUsd >= 10)) throw new Error("config.minOrderUsd must be >= 10 (Hyperliquid minimum)");
   if (!(cfg.slippage > 0 && cfg.slippage <= 0.05)) throw new Error("config.slippage must be in (0, 0.05]");
   if (!(cfg.intervalSec >= 60)) throw new Error("config.intervalSec must be >= 60");

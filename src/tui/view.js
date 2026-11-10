@@ -151,7 +151,7 @@ function kpis(m) {
     t.push({ label: "NEXT CYCLE", value: bold(C.info(clock(m.nextMs))) + (m.ctl.paused ? C.warn(" paused") : m.ctl.live ? C.down(" live") : C.mute(" dry")), sub: (w) => { const txt = ` ${C.mute(`every ${dur(m.intervalMs / 1000)}`)}`; const mw = w - width(txt); return mw >= 4 ? meter(frac, mw, PAL.info) + txt : txt.trim(); } });
   } else t.push({ label: "NEXT CYCLE", value: C.soft("not scheduled"), sub: () => C.mute(m.state === "nostate" ? "no bot state" : "bot is stopped") });
   if (m.sigAge != null) {
-    const stale = m.sigAge > m.maxAge, col = stale ? PAL.down : m.sigAge > 120 ? PAL.warn : PAL.up;
+    const stale = m.sigAge > m.maxAge, col = stale ? PAL.down : m.sigAge > 300 ? PAL.warn : PAL.up;
     t.push({ label: "SIGNAL", value: bold(fg(col)(stale ? "STALE" : dur(m.sigAge))) + C.mute(stale ? ` ${dur(m.sigAge)}` : " old") + (m.sig.fromState ? C.mute(" (cached)") : ""), sub: (w) => { const txt = ` ${C.mute(`skip >${dur(m.maxAge)}`)}`; const mw = w - width(txt); return m.signalErr ? C.warn(ell("refresh failed", w)) : mw >= 4 ? meter(m.sigAge / m.maxAge, mw, col) + txt : txt.trim(); } });
   } else t.push({ label: "SIGNAL", value: m.signalErr ? C.down("unavailable") : C.mute("loading…"), sub: (w) => C.mute(ell(m.signalErr ?? "fetching mood ring", w)) });
   return t;
@@ -167,7 +167,7 @@ function tiles(m, W, tint) {
 
 function kpiLine(m, W) {
   const roomCol = m.s?.killed ? C.down : m.roomFrac == null ? C.mute : m.roomFrac > 0.6 ? C.up : m.roomFrac > 0.3 ? C.warn : C.down;
-  const sigCol = m.sigAge == null ? C.mute : m.sigAge > m.maxAge ? C.down : m.sigAge > 120 ? C.warn : C.up;
+  const sigCol = m.sigAge == null ? C.mute : m.sigAge > m.maxAge ? C.down : m.sigAge > 300 ? C.warn : C.up;
   const items = [
     `${C.mute("equity")} ${bold(C.fg(usd(m.equity, { compact: true })))}`,
     `${C.mute("today")} ${bold(sgnCol(m.dayPnl)(usd(m.dayPnl, { sign: true, compact: true })))}${m.dayPct != null ? " " + sgnCol(m.dayPnl)(`${signed(Number(m.dayPct.toFixed(1)))}%`) : ""}`,
@@ -378,7 +378,7 @@ function safetyBody(m, w) {
   else if (m.roomFrac != null) { const col = m.roomFrac > 0.6 ? PAL.up : m.roomFrac > 0.3 ? PAL.warn : PAL.down; out.push(row("daily loss stop", meter(m.roomFrac, mw, col), `${fg(col)(usd(m.room))} ${C.mute(`room · stops at ${usd(m.stopAt)} (−${Math.round(m.killPct * 100)}% of ${usd(m.dayStart)})`)}`)); }
   if (m.cap) out.push(row("gross exposure", meter(m.gross / m.cap, mw, PAL.accent), `${C.fg(usd(m.gross))} ${C.mute(`of ${usd(m.cap)} max · ${m.levUsed.toFixed(2)}x of ${m.lev}x`)}`));
   if (m.gross > 0) out.push(row("long │ short", splitBar(m.long, m.short, mw), `${C.up(usd(m.long))} ${C.mute("│")} ${C.down(usd(m.short))} ${C.mute("· net")} ${sgnCol(m.net)(usd(m.net, { sign: true }))}`));
-  if (m.sigAge != null) { const col = m.sigAge > m.maxAge ? PAL.down : m.sigAge > 120 ? PAL.warn : PAL.up; out.push(row("signal age", meter(m.sigAge / m.maxAge, mw, col), `${fg(col)(dur(m.sigAge))} ${C.mute(`· bot skips when older than ${dur(m.maxAge)}`)}`)); }
+  if (m.sigAge != null) { const col = m.sigAge > m.maxAge ? PAL.down : m.sigAge > 300 ? PAL.warn : PAL.up; out.push(row("signal age", meter(m.sigAge / m.maxAge, mw, col), `${fg(col)(dur(m.sigAge))} ${C.mute(`· bot skips when older than ${dur(m.maxAge)}`)}`)); }
   const stops = m.s?.stops ?? [], held = m.rows.filter((r) => Math.abs(r.current) > 0.005).length;
   if (m.s) {
     const rest = stops.filter((x) => x.status === "resting").length, trail = stops.filter((x) => x.armed).map((x) => bare(x.coin));

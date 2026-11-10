@@ -3,7 +3,7 @@
 // trade the owner account through a trading-only API wallet. Dry-run until `live` is on.
 import { ALL_MARKETS, PATHS, loadConfig, loadCredentials, ensureDataDir } from "./config.js";
 import { makeClients, loadMarkets, fetchSignal, snapshot, sendOrders } from "./hl.js";
-import { targetRows, buildOrders, formatSize, formatPrice } from "./strategy.js";
+import { targetRows, buildOrders, drawdownCheck, formatSize, formatPrice } from "./strategy.js";
 import { readControl, updateControl, readState, readJson, writeJson, logEvent } from "./control.js";
 import { detectStopFills, syncStops, cancelAllStops } from "./stops.js";
 import { X1_BUILDER } from "./config.js";
@@ -43,15 +43,16 @@ async function alertsFor(prev, out, stopEvents) {
   const msgs = [];
   for (const e of stopEvents) msgs.push(`🛑 ${e.msg}`);
   if (prev.live !== undefined && prev.live !== out.live) msgs.push(out.live ? "🔴 LIVE trading turned ON" : "⚪ Live trading turned OFF (dry-run). Open positions keep their stops.");
-  if (prev.paused !== undefined && prev.paused !== out.paused) msgs.push(out.paused ? "⏸ Bot paused" : "▶ Bot resumed");
+  if (out.drawdownStop) msgs.push(`🛑 Drawdown stop: equity ${money(out.drawdownStop.equity)} is ${(out.drawdownStop.pct * 100).toFixed(1)}% below its peak ${money(out.drawdownStop.peak)}. The bot is PAUSED; open positions keep their stop-losses. Resume from the dashboard (p) when you have looked. A withdrawal can also trigger this.`);
+  else if (prev.paused !== undefined && prev.paused !== out.paused) msgs.push(out.paused ? "⏸ Bot paused" : "▶ Bot resumed");
   if (out.fills?.length) msgs.push(`${out.fills.some((f) => f.error) ? "⚠️ Some orders were rejected" : "✅ Sent"} ${out.fills.length} order(s) · equity ${money(out.equity)}\n` + out.fills.map((f) => `${f.tag} ${f.coin}: ${f.error ? `ERROR ${f.error}` : f.filled ? `filled ${f.filled} @ ${f.avgPx}` : "not filled"}`).join("\n"));
   if (out.error) {
     if (!A.errorSince) { A.errorSince = out.ts; A.errorCount = 1; msgs.push(`⚠️ Cycle error: ${out.error}`); }
     else if (++A.errorCount === 6) msgs.push(`⚠️ Still failing after 6 cycles (~30 min): ${out.error}`);
   } else if (A.errorSince) { msgs.push(`✅ Recovered after ${A.errorCount} failed cycle(s)`); delete A.errorSince; delete A.errorCount; }
   if (out.killed && !prev.killed) msgs.push(`🛑 Daily loss stop hit: equity ${money(out.equity)} (${money(out.dayPnl, true)} today). Only reductions until UTC midnight.`);
-  const stale = /signal stale/.test(out.skip ?? "");
-  if (stale && !A.stale) { A.stale = true; msgs.push(`⚠️ Mood Ring signal is stale, so the bot is not trading (${out.skip}).`); }
+  const stale = /signal (stale|unavailable)/.test(out.skip ?? "");
+  if (stale && !A.stale) { A.stale = true; msgs.push(`⚠️ Mood Ring signal problem, so the bot is not trading (${out.skip}). Stop-losses stay in place.`); }
   else if (!stale && A.stale && !out.error) { A.stale = false; msgs.push("✅ Signal is fresh again; trading resumed"); }
   const today = new Date().toISOString().slice(0, 10);
   if (out.agentValidUntil) {
@@ -74,6 +75,7 @@ async function alertsFor(prev, out, stopEvents) {
   for (const m of msgs) await notify(m);
 }
 let stopping = false;
+let warnedNoHistory = false;
 
 function flattenOrders(snap) {
   return Object.entries(snap.positions).filter(([coin, p]) => markets[coin] && p.szi !== 0).map(([coin, p]) => {
@@ -89,23 +91,41 @@ async function cycle(reason) {
   const stopEvents = [];
   const out = { ts: started, pid: process.pid, network, owner: creds.owner, agent, live: ctl.live, paused: ctl.paused, reason, cfg, skip: null, error: null, pnl: null, pnlError: null, rows: [], orders: [], fills: [] };
   try {
-    const [snap, signal] = await Promise.all([snapshot(info, creds.owner, markets), fetchSignal()]);
+    // A failed signal fetch must not fail the cycle: stop upkeep, flatten and P&L do not need it.
+    const [snap, sig] = await Promise.all([snapshot(info, creds.owner, markets), fetchSignal().then((s) => ({ s }), (e) => ({ err: e?.message ?? String(e) }))]);
+    const signal = sig.s ?? null;
     const snapAt = Date.now();
     const me = snap.agents.find((a) => a.address.toLowerCase() === agent.toLowerCase());
     const day = new Date().toISOString().slice(0, 10);
     const dayStart = state.day === day && state.dayStart > 0 ? state.dayStart : snap.equity;
     const dayPnl = snap.equity - dayStart;
     const killed = dayStart > 0 && dayPnl <= -cfg.killPct * dayStart;
+    // Drawdown stop: pause once equity is maxDrawdownPct below its high-water mark, then re-base the
+    // mark so that resuming does not trip it again at once.
+    const dd = drawdownCheck(state.peakEquity, snap.equity, cfg.maxDrawdownPct);
+    let peakEquity = dd.peak;
+    if (dd.hit && !ctl.paused && !ctl.flatten) {
+      updateControl({ paused: true }); ctl.paused = true; out.paused = true;
+      out.drawdownStop = { peak: dd.peak, equity: snap.equity, pct: dd.dd };
+      peakEquity = snap.equity;
+      say(`drawdown stop: equity $${snap.equity.toFixed(2)} is ${(dd.dd * 100).toFixed(1)}% below its peak $${dd.peak.toFixed(2)}; bot paused`, { kind: "control" });
+    }
+    // Prices for every coin in the signal, traded or not, so history can be used to test other markets.
+    const signalMids = Object.fromEntries((signal?.coins ?? []).map((c) => [c.coin, Number(snap.allMids[c.coin])]).filter(([, v]) => v > 0));
     Object.assign(out, {
-      mode: snap.mode, equity: snap.equity, day, dayStart, dayPnl, killed, spot: snap.spot, positions: snap.positions, mids: snap.mids,
-      agentValidUntil: me?.validUntil ?? null, builderFeeOk: snap.builderFeeUnits >= 50,
-      signal: { timestamp: signal.timestamp, coins: signal.coins.map(({ history, ...c }) => c) },
+      mode: snap.mode, equity: snap.equity, day, dayStart, dayPnl, killed, peakEquity, drawdown: dd.dd, spot: snap.spot, positions: snap.positions, mids: snap.mids, signalMids,
+      agentValidUntil: me?.validUntil ?? null, builderFeeOk: snap.builderFeeUnits >= 50, signalError: sig.err ?? null,
+      // Left unset when the fetch failed, so the saved state keeps the last good reading.
+      ...(signal ? { signal: { timestamp: signal.timestamp, timestampFrom: signal.timestampFrom, coins: signal.coins.map(({ history, ...c }) => c) } } : {}),
     });
-    const signalAge = signal.timestamp ? (Date.now() - signal.timestamp) / 1000 : Infinity;
+    if (signal?.timestampFrom === "server" && !warnedNoHistory) { warnedNoHistory = true; say("signal carries no history timestamps; the freshness check falls back to the server clock", { kind: "control" }); }
+    const signalAge = signal?.timestamp ? (Date.now() - signal.timestamp) / 1000 : Infinity;
     const sc = cfg.stops;
-    if (sc.enabled) for (const e of await detectStopFills({ info, owner: creds.owner, book, positions: snap.positions, signal, sc, now: Date.now() })) { say(e.msg, e); if (e.stop) stopEvents.push(e); }
+    // Without a fresh signal, stop fills are still detected (scored with the last known reading) but no block is lifted.
+    if (sc.enabled) for (const e of await detectStopFills({ info, owner: creds.owner, book, positions: snap.positions, signal: signal ?? state.signal ?? { coins: [] }, sc, now: Date.now(), canRelease: !!signal })) { say(e.msg, e); if (e.stop) stopEvents.push(e); }
     out.stopEvents = stopEvents;
-    out.rows = targetRows({ equity: snap.equity, cfg, signal, current: snap.current, killed });
+    // No signal: every score is unknown, so every row holds.
+    out.rows = targetRows({ equity: snap.equity, cfg, signal: signal ?? { coins: [] }, current: snap.current, killed });
     // Re-entry block: a coin whose stop fired is not re-opened until its signal changes.
     for (const r of out.rows) if (book.blocks[r.coin]) Object.assign(r, { target: r.current, gap: 0, actions: ["BLOCKED"], blocked: book.blocks[r.coin] });
 
@@ -114,6 +134,7 @@ async function cycle(reason) {
 
     if (!me || me.validUntil <= Date.now()) out.skip = "API wallet not authorized or expired";
     else if (cfg.builderFee && !out.builderFeeOk) out.skip = "builder fee not approved";
+    else if (!ctl.flatten && !signal) out.skip = `signal unavailable (${sig.err})`;
     else if (!ctl.flatten && signalAge > cfg.maxSignalAgeSec) out.skip = `signal stale (${Math.round(signalAge)}s old)`;
     else if (!ctl.flatten && snap.equity < MIN_EQUITY) out.skip = `equity $${snap.equity.toFixed(2)} below $${MIN_EQUITY}`;
     else if (ctl.paused && !ctl.flatten) out.skip = "paused";

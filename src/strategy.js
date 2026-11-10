@@ -45,6 +45,16 @@ export function targetRows({ equity, cfg, signal, current, killed = false }) {
   });
 }
 
+/**
+ * Drawdown from the equity high-water mark. Returns the peak to carry forward, the drawdown as a
+ * fraction of it, and whether it has reached maxPct (0 turns the check off).
+ */
+export function drawdownCheck(peak, equity, maxPct) {
+  const hi = Math.max(peak > 0 ? peak : 0, equity);
+  const dd = hi > 0 ? 1 - equity / hi : 0;
+  return { peak: hi, dd, hit: maxPct > 0 && dd >= maxPct };
+}
+
 // Hyperliquid perp prices: ≤5 significant figures and ≤(6 − szDecimals) decimals.
 export function formatPrice(px, szDecimals) {
   if (Number.isInteger(px) && px >= 1e5) return String(px);

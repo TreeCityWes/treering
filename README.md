@@ -25,7 +25,8 @@ The sizing mirrors X1 Terminal's hosted Auto Trader, and the protections mirror 
 | Trailing stop | Arms at +4%, moves to breakeven +0.1%, then trails 4% behind the best price; only tightens |
 | Re-entry block | After a stop fills, the coin is not re-opened until its signal flips, goes flat, leaves the signal, or its weight moves >25% |
 | Daily loss stop | Once down 10% on the UTC day, the bot only reduces or closes |
-| Fail-safes | Skips trading on a stale signal (>10 min), an expired API wallet, a missing fee approval or equity under $15 |
+| Drawdown stop | Pauses the bot when equity is 15% below its highest value seen (`maxDrawdownPct`, 0 = off). Positions keep their stops; resume when you have looked |
+| Fail-safes | Skips trading when the signal is unreachable or its newest reading is over 10 minutes old (stops are still kept up to date), an expired API wallet, a missing fee approval or equity under $15 |
 
 ## Requirements
 
@@ -102,7 +103,7 @@ Screenshots use the demo data in `fixtures/demo` (`TREERING_DATA_DIR=fixtures/de
 
 ## Telegram alerts
 
-Put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env.alerts` (git-ignored). You'll be messaged on start/stop, orders sent or rejected, stop-loss fills, live/pause changes, cycle errors (first, persistent, recovered), the daily loss stop, a stale signal, positions without a resting stop, API wallet expiry, and a daily summary.
+Put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env.alerts` (git-ignored). You'll be messaged on start/stop, orders sent or rejected, stop-loss fills, live/pause changes, cycle errors (first, persistent, recovered), the daily loss stop, the drawdown stop, a stale or unreachable signal, positions without a resting stop, API wallet expiry, and a daily summary.
 
 A separate watchdog alerts if the bot stops cycling:
 

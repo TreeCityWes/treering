@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stopPlan, releaseReason, stopOrder, tighter } from "../src/stops.js";
+import { stopPlan, releaseReason, stopOrder, tighter, detectStopFills } from "../src/stops.js";
 
 const sc = { stopLossPct: 0.08, stopSlippage: 0.1, trailArmPct: 0.04, trailPct: 0.04, reentryWeightChange: 0.25 };
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
@@ -68,4 +68,19 @@ test("stop order wire: reduce-only stop-market, slippage-capped, side-correct", 
 test("tighter picks the protective side", () => {
   assert.equal(tighter(1, 90, 95), 95);
   assert.equal(tighter(-1, 110, 105), 105);
+});
+
+test("re-entry blocks are not lifted while the signal is unavailable", async () => {
+  const sc = { reentryWeightChange: 0.25 };
+  const mk = () => ({ trail: {}, oids: {}, blocks: { HYPE: { side: -1, weight: -0.4 } } });
+  // Fetch failed: the coin is missing only because nothing was read, so the block must stay.
+  const held = mk();
+  const none = await detectStopFills({ info: null, owner: "0x0", book: held, positions: {}, signal: { coins: [] }, sc, now: 1, canRelease: false });
+  assert.deepEqual(none, []);
+  assert.ok(held.blocks.HYPE);
+  // Fresh reading without the coin: it really left the signal, so the block lifts.
+  const lifted = mk();
+  const ev = await detectStopFills({ info: null, owner: "0x0", book: lifted, positions: {}, signal: { coins: [] }, sc, now: 1 });
+  assert.match(ev[0].msg, /left the signal/);
+  assert.equal(lifted.blocks.HYPE, undefined);
 });
