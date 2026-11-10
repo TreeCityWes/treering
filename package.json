@@ -11,12 +11,12 @@
     "bot": "node src/bot.js",
     "tui": "node src/tui.js",
     "once": "node src/bot.js --once",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "watch": "watch -c -t -n 2 node src/tui.js --plain",
     "pnl": "node src/report.js"
   },
   "dependencies": {
-    "@nktkas/hyperliquid": "0.32.2",
+    "@nktkas/hyperliquid": "0.33.3",
     "viem": "2.57.16"
   },
   "license": "MIT",

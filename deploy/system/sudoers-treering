@@ -1,0 +1,3 @@
+# /etc/sudoers.d/treering  (install with: visudo -cf deploy/system/sudoers-treering && install -m 0440 ...)
+# Operators may start, stop and restart the bot without a password. Deploying new code still needs one.
+%treering ALL=(root) NOPASSWD: /usr/bin/systemctl start treering.service, /usr/bin/systemctl stop treering.service, /usr/bin/systemctl restart treering.service

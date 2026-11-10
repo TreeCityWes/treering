@@ -1,0 +1,28 @@
+[Unit]
+Description=Treering watchdog (alerts if the bot stops cycling)
+
+[Service]
+Type=oneshot
+User=treering
+Group=treering
+WorkingDirectory=/opt/treering
+Environment=TREERING_DATA_DIR=/var/lib/treering TREERING_CONFIG_FILE=/etc/treering/config.json TREERING_SHARED_GROUP=1
+EnvironmentFile=-/etc/treering/alerts.env
+ExecStart=/usr/bin/node /opt/treering/src/watchdog.js
+UMask=0007
+ReadWritePaths=/var/lib/treering
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native

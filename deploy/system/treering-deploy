@@ -1,0 +1,26 @@
+#!/bin/sh
+# Deploy a commit of the repo to /opt/treering, run the tests, and restart the bot between cycles.
+# Install to /usr/local/sbin/treering-deploy and run with sudo:  sudo treering-deploy [git-ref]
+# The code the bot runs is root-owned, so this (password-protected) step is the only way to change it.
+set -eu
+APP=/opt/treering
+REPO="${TREERING_REPO:-https://github.com/TreeCityWes/treering.git}"
+REF="${1:-origin/main}"
+[ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
+[ -d "$APP/.git" ] || git clone --quiet "$REPO" "$APP"
+cd "$APP"
+prev="$(git rev-parse HEAD)"
+git fetch --quiet origin
+build() { git checkout --quiet --detach "$1" && /usr/bin/npm ci --omit=dev --ignore-scripts --no-fund --no-audit --silent; }
+build "$REF"
+if ! /usr/bin/node --test "test/*.test.js" >/tmp/treering-deploy-tests.log 2>&1; then
+  echo "tests failed (see /tmp/treering-deploy-tests.log); going back to $prev, bot not restarted" >&2
+  build "$prev"; exit 1
+fi
+echo "deployed $(git rev-parse --short HEAD) (was $(git rev-parse --short "$prev"))"
+systemctl is-enabled --quiet treering.service 2>/dev/null || { echo "treering.service is not enabled; not restarting"; exit 0; }
+# Do not restart in the middle of a cycle: if one is due within 20s (or just started), wait it out.
+wait="$(/usr/bin/node -e 'try{const s=JSON.parse(require("fs").readFileSync("/var/lib/treering/state.json","utf8"));const d=s.nextCycleAt-Date.now();console.log(d<20000&&d>-20000?Math.ceil((d+20000)/1000):0)}catch{console.log(0)}')"
+[ "$wait" -gt 0 ] && { echo "waiting ${wait}s for the current cycle"; sleep "$wait"; }
+systemctl restart treering.service
+echo "restarted treering.service"

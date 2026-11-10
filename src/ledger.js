@@ -7,6 +7,7 @@ import { PATHS } from "./config.js";
 import { readJson, writeJson } from "./control.js";
 
 const isPerp = (coin) => typeof coin === "string" && !coin.startsWith("@") && !coin.includes("/");
+const KNOWN_LEDGER = ["deposit", "withdraw", "internalTransfer", "subAccountTransfer", "spotTransfer", "accountClassTransfer", "vaultDeposit", "vaultWithdraw"];
 
 /**
  * Every row in [since, until] from a time-ranged info endpoint. Hyperliquid caps each response
@@ -53,42 +54,64 @@ export function ledgerFlow(delta, owner, unified) {
   }
 }
 
-/** Sum fills, funding and flows into a P&L breakdown. Pure, so it is tested without the network. */
-export function summarize({ fills, funding, ledger, owner, unified, start, equity, upnl, now = Date.now() }) {
-  const byCoin = {};
-  let realized = 0, fees = 0, builderFees = 0, volume = 0, trades = 0;
+const emptyAgg = () => ({ realized: 0, fees: 0, builderFees: 0, volume: 0, trades: 0, funding: 0, flows: 0, byCoin: {}, unknown: [] });
+const emptyCoin = () => ({ realized: 0, fees: 0, funding: 0, fills: 0, volume: 0 });
+
+/** Plain sums over the rows with from <= time < to. Additive, so two windows can be merged. */
+export function aggregate({ fills, funding, ledger, owner, unified, from, to = Infinity }) {
+  const a = emptyAgg(), unknown = new Set();
+  const within = (t) => t >= from && t < to;
   for (const f of fills) {
-    if (f.time < start.since) continue;
+    if (!within(f.time)) continue;
     const fee = Number(f.fee) || 0, bf = Number(f.builderFee) || 0;
-    fees += fee; builderFees += bf;
+    a.fees += fee; a.builderFees += bf;
     if (!isPerp(f.coin)) continue;
-    const c = (byCoin[f.coin] ??= { realized: 0, fees: 0, funding: 0, fills: 0, volume: 0 });
+    const c = (a.byCoin[f.coin] ??= emptyCoin());
     const r = Number(f.closedPnl) || 0, v = Number(f.px) * Number(f.sz);
     c.realized += r; c.fees += fee; c.fills++; c.volume += v;
-    realized += r; volume += v; trades++;
+    a.realized += r; a.volume += v; a.trades++;
   }
-  let fundingTotal = 0;
   for (const x of funding) {
-    if (x.time < start.since) continue;
+    if (!within(x.time)) continue;
     const usdc = Number(x.delta?.usdc) || 0;
-    fundingTotal += usdc;
-    (byCoin[x.delta?.coin] ??= { realized: 0, fees: 0, funding: 0, fills: 0, volume: 0 }).funding += usdc;
+    a.funding += usdc;
+    (a.byCoin[x.delta?.coin] ??= emptyCoin()).funding += usdc;
   }
-  const unknown = new Set();
-  let flows = 0;
   for (const l of ledger) {
-    if (l.time < start.since) continue;
-    flows += ledgerFlow(l.delta, owner, unified);
-    if (!["deposit", "withdraw", "internalTransfer", "subAccountTransfer", "spotTransfer", "accountClassTransfer", "vaultDeposit", "vaultWithdraw"].includes(l.delta?.type)) unknown.add(l.delta?.type);
+    if (!within(l.time)) continue;
+    a.flows += ledgerFlow(l.delta, owner, unified);
+    if (!KNOWN_LEDGER.includes(l.delta?.type)) unknown.add(l.delta?.type);
   }
-  const total = equity - start.equity - flows;
-  const explained = realized - fees + fundingTotal + (upnl - (start.upnl ?? 0));
-  const basis = start.equity + Math.max(0, flows);
+  a.unknown = [...unknown];
+  return a;
+}
+
+export function mergeAgg(a, b) {
+  const out = emptyAgg();
+  for (const k of ["realized", "fees", "builderFees", "volume", "trades", "funding", "flows"]) out[k] = (a[k] ?? 0) + (b[k] ?? 0);
+  for (const src of [a.byCoin ?? {}, b.byCoin ?? {}]) for (const [coin, c] of Object.entries(src)) {
+    const t = (out.byCoin[coin] ??= emptyCoin());
+    for (const k of Object.keys(t)) t[k] += c[k] ?? 0;
+  }
+  out.unknown = [...new Set([...(a.unknown ?? []), ...(b.unknown ?? [])])];
+  return out;
+}
+
+/** Turn the sums into the P&L breakdown. */
+export function finish(agg, { start, equity, upnl, now = Date.now() }) {
+  const total = equity - start.equity - agg.flows;
+  const explained = agg.realized - agg.fees + agg.funding + (upnl - (start.upnl ?? 0));
+  const basis = start.equity + Math.max(0, agg.flows);
   return {
-    since: start.since, startEquity: start.equity, equity, flows, total, totalPct: basis > 0 ? (total / basis) * 100 : null,
-    realized, fees, builderFees, funding: fundingTotal, upnl, explained, residual: total - explained,
-    trades, volume, byCoin, unknownLedgerTypes: [...unknown], days: (now - start.since) / 864e5, ts: now,
+    since: start.since, startEquity: start.equity, equity, flows: agg.flows, total, totalPct: basis > 0 ? (total / basis) * 100 : null,
+    realized: agg.realized, fees: agg.fees, builderFees: agg.builderFees, funding: agg.funding, upnl, explained, residual: total - explained,
+    trades: agg.trades, volume: agg.volume, byCoin: agg.byCoin, unknownLedgerTypes: agg.unknown, days: (now - start.since) / 864e5, ts: now,
   };
+}
+
+/** Sum fills, funding and flows into a P&L breakdown. Pure, so it is tested without the network. */
+export function summarize({ fills, funding, ledger, owner, unified, start, equity, upnl, now = Date.now() }) {
+  return finish(aggregate({ fills, funding, ledger, owner, unified, from: start.since }), { start, equity, upnl, now });
 }
 
 /** The start point: data/pnl.json, created on the first call from the current equity. */
@@ -100,18 +123,48 @@ export function pnlStart(equity, upnl, asOf = Date.now()) {
   return fresh;
 }
 
+// Checkpoint: the sums for [since, upTo) are kept in data/pnl-cache.json, so each cycle fetches only
+// the rows after upTo instead of the whole history. upTo trails the present by CKPT_LAG so rows
+// that land a little late are still read live, it advances every CKPT_EVERY, and the whole thing
+// is rebuilt from scratch once every CKPT_FULL so an error cannot persist. Deleting the file is safe.
+export const CKPT_LAG = 3600e3, CKPT_EVERY = 6 * 3600e3, CKPT_FULL = 24 * 3600e3;
+
+/** The checkpoint to build on: the saved one if it matches this start point and is recent, else an empty one. */
+export function checkpointBase(cache, { start, owner, unified, asOf }) {
+  const ok = cache?.v === 1 && cache.since === start.since && cache.unified === unified
+    && typeof cache.owner === "string" && cache.owner.toLowerCase() === owner.toLowerCase()
+    && cache.upTo > start.since && cache.upTo <= asOf && asOf - cache.fullAt <= CKPT_FULL && cache.agg;
+  return ok ? cache : { v: 1, since: start.since, owner, unified, upTo: start.since, fullAt: asOf, agg: emptyAgg() };
+}
+
+/** Combine a checkpoint with the rows fetched since it. Returns the totals and, when due, the next checkpoint to save. */
+export function applyCheckpoint(base, rows, { asOf }) {
+  const args = { ...rows, owner: base.owner, unified: base.unified };
+  const total = mergeAgg(base.agg, aggregate({ ...args, from: base.upTo }));
+  let next = null;
+  if (asOf - base.upTo > CKPT_EVERY + CKPT_LAG) {
+    const upTo = asOf - CKPT_LAG;
+    next = { ...base, upTo, agg: mergeAgg(base.agg, aggregate({ ...args, from: base.upTo, to: upTo })) };
+  }
+  return { total, next };
+}
+
 /**
  * P&L as of `asOf`, the moment `equity`/`upnl` were read. Fills, funding and flows are bounded to
  * the same moment, so this cycle's own orders (sent after the snapshot) count next cycle, when the
  * equity reflects them too; otherwise a close would be counted both as realized and as stale uPnL.
+ * `persist: false` reads the checkpoint but never writes it (reports).
  */
-export async function fetchPnl(info, owner, { equity, upnl, unified, asOf = Date.now() }) {
+export async function fetchPnl(info, owner, { equity, upnl, unified, asOf = Date.now(), persist = true }) {
   const start = pnlStart(equity, upnl, asOf);
+  const base = checkpointBase(readJson(PATHS.pnlCache, null), { start, owner, unified, asOf });
   const ranged = (method, extra = {}) => (s, e) => info[method]({ user: owner, startTime: s, endTime: e, ...extra });
   const [fills, funding, ledger] = await Promise.all([
-    pageByTime(ranged("userFillsByTime"), start.since, asOf, (f) => `${f.tid}:${f.oid}`),
-    pageByTime(ranged("userFunding"), start.since, asOf, (x) => `${x.time}:${x.hash}:${x.delta?.coin}`),
-    pageByTime(ranged("userNonFundingLedgerUpdates"), start.since, asOf, (x) => `${x.time}:${x.hash}:${x.delta?.type}`),
+    pageByTime(ranged("userFillsByTime"), base.upTo, asOf, (f) => `${f.tid}:${f.oid}`),
+    pageByTime(ranged("userFunding"), base.upTo, asOf, (x) => `${x.time}:${x.hash}:${x.delta?.coin}`),
+    pageByTime(ranged("userNonFundingLedgerUpdates"), base.upTo, asOf, (x) => `${x.time}:${x.hash}:${x.delta?.type}`),
   ]);
-  return { ...summarize({ fills, funding, ledger, owner, unified, start, equity, upnl, now: asOf }), asOf };
+  const { total, next } = applyCheckpoint(base, { fills, funding, ledger }, { asOf });
+  if (next && persist) { try { writeJson(PATHS.pnlCache, next); } catch { /* the next cycle just fetches a little more */ } }
+  return { ...finish(total, { start, equity, upnl, now: asOf }), asOf, fetchedFrom: base.upTo };
 }

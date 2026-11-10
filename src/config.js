@@ -6,14 +6,22 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const DATA_DIR = process.env.TREERING_DATA_DIR ?? process.env.MOODRING_DATA_DIR ?? join(ROOT, "data");
 export const PATHS = {
   env: process.env.TREERING_ENV_FILE ?? process.env.MOODRING_ENV_FILE ?? join(ROOT, ".env.agent"),
-  config: join(ROOT, "config.json"),
+  config: process.env.TREERING_CONFIG_FILE ?? join(ROOT, "config.json"),
   state: join(DATA_DIR, "state.json"),
   control: join(DATA_DIR, "control.json"),
   stops: join(DATA_DIR, "stops.json"),
   log: join(DATA_DIR, "events.jsonl"),
   pnl: join(DATA_DIR, "pnl.json"),
+  pnlCache: join(DATA_DIR, "pnl-cache.json"),
   history: join(DATA_DIR, "history"),
 };
+
+// File modes for the data directory. Owner-only by default. When the bot runs as its own system user
+// (deploy/system), TREERING_SHARED_GROUP=1 makes files group-readable/writable so an operator in the
+// bot's group can use the dashboard and `ctl` without being able to read the bot's secrets.
+const SHARED = process.env.TREERING_SHARED_GROUP === "1";
+export const FILE_MODE = SHARED ? 0o660 : 0o600;
+export const DIR_MODE = SHARED ? 0o770 : 0o700;
 
 export const SIGNAL_URL = "https://wxnt-sale-sim.vercel.app/api/daytraders?view=sent";
 // X1's builder code. Your owner account approved it on the terminal's /API page.
@@ -72,6 +80,13 @@ export function loadCredentials() {
   return { owner, key, network: env.X1_NETWORK ?? null };
 }
 
+/** The owner account address only (public), for read-only tools that must not need the agent key. */
+export function loadOwner() {
+  let env = process.env;
+  try { if (existsSync(PATHS.env)) env = { ...parseEnvFile(PATHS.env), ...process.env }; } catch { /* unreadable: fall back to the environment */ }
+  return /^0x[0-9a-fA-F]{40}$/.test(env.X1_ACCOUNT_ADDRESS ?? "") ? { owner: env.X1_ACCOUNT_ADDRESS, network: env.X1_NETWORK ?? null } : null;
+}
+
 export function loadConfig() {
   const user = existsSync(PATHS.config) ? JSON.parse(readFileSync(PATHS.config, "utf8")) : {};
   const cfg = { ...DEFAULT_CONFIG, ...user, stops: { ...DEFAULT_CONFIG.stops, ...(user.stops ?? {}) }, rebalance: { ...DEFAULT_CONFIG.rebalance, ...(user.rebalance ?? {}) } };
@@ -94,4 +109,4 @@ export function loadConfig() {
   return cfg;
 }
 
-export function ensureDataDir() { mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 }); }
+export function ensureDataDir() { mkdirSync(DATA_DIR, { recursive: true, mode: DIR_MODE }); }

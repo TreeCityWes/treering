@@ -1,0 +1,29 @@
+#!/bin/sh
+# Operator commands for the bot when it runs as a system service. Install to /usr/local/bin/treering.
+# Anyone in the `treering` group can use it; none of these commands can read the bot's secrets.
+set -eu
+umask 007
+export TREERING_DATA_DIR=/var/lib/treering TREERING_CONFIG_FILE=/etc/treering/config.json TREERING_SHARED_GROUP=1
+APP=/opt/treering NODE=/usr/bin/node
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  tui) exec "$NODE" "$APP/src/tui.js" "$@" ;;
+  pnl) exec "$NODE" "$APP/src/report.js" "$@" ;;
+  status|pause|resume|flatten|run|live) exec "$NODE" "$APP/src/ctl.js" "$cmd" "$@" ;;
+  logs) exec journalctl -u treering.service "$@" ;;
+  start|stop|restart) exec sudo /usr/bin/systemctl "$cmd" treering.service ;;
+  *) cat <<'USAGE'
+usage: treering <command>
+  tui                      dashboard
+  pnl [--json]             P&L report
+  status                   last cycle, equity, controls
+  pause | resume | run     hold new orders / resume / run a cycle now
+  live on|off              live trading or dry-run
+  flatten                  close every position, then pause
+  logs [-f] [-n 50]        service log (journalctl options)
+  start | stop | restart   the service (no password needed)
+Deploying new code: sudo treering-deploy   (needs your password)
+USAGE
+  ;;
+esac

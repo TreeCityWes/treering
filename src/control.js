@@ -1,13 +1,15 @@
 // Tiny file-based control channel between the bot service, the TUI and `npm run ctl`.
-import { readFileSync, writeFileSync, renameSync, existsSync, appendFileSync, statSync, openSync, readSync, closeSync } from "node:fs";
-import { PATHS, ensureDataDir } from "./config.js";
+import { readFileSync, writeFileSync, renameSync, chmodSync, existsSync, appendFileSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { PATHS, FILE_MODE, ensureDataDir } from "./config.js";
 
 export const DEFAULT_CONTROL = { paused: false, live: false, flatten: false, runNow: false };
 
 export function writeJson(path, value) {
   ensureDataDir();
   const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
+  writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: FILE_MODE });
+  // The create mode is cut by the umask; a shared data dir needs the group bits whatever the writer's umask is.
+  if (FILE_MODE !== 0o600) chmodSync(tmp, FILE_MODE);
   renameSync(tmp, path);
 }
 
@@ -22,7 +24,7 @@ export const readState = () => readJson(PATHS.state, null);
 export function logEvent(event) {
   ensureDataDir();
   const line = { ts: Date.now(), ...event };
-  appendFileSync(PATHS.log, JSON.stringify(line) + "\n", { mode: 0o600 });
+  appendFileSync(PATHS.log, JSON.stringify(line) + "\n", { mode: FILE_MODE });
   return line;
 }
 

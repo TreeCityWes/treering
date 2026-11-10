@@ -2,6 +2,11 @@ import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { privateKeyToAccount } from "viem/accounts";
 import { SIGNAL_URL, X1_BUILDER } from "./config.js";
 
+/** Read-only client: public info calls need no key. */
+export function makeInfo(network) {
+  return new InfoClient({ transport: new HttpTransport({ isTestnet: network === "testnet", timeout: 15_000 }) });
+}
+
 export function makeClients({ owner, key, network }) {
   const account = privateKeyToAccount(key);
   if (account.address.toLowerCase() === owner.toLowerCase())

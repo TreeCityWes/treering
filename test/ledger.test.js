@@ -61,3 +61,46 @@ test("pageByTime follows pages past the per-response cap and de-duplicates edges
   assert.equal(got.length, 1234);
   assert.ok(calls.length >= 3 && calls.length <= 5, `calls ${calls.length}`);
 });
+
+test("checkpoint: sums before the mark plus live rows equal a full recompute, across advances", async () => {
+  const { aggregate, finish, checkpointBase, applyCheckpoint, CKPT_LAG, CKPT_EVERY, CKPT_FULL } = await import("../src/ledger.js");
+  const owner = "0xabc0000000000000000000000000000000000001", H = 3600e3, t0 = 1_794_000_000_000;
+  const start = { since: t0, equity: 100, upnl: 0 };
+  const all = { fills: [], funding: [], ledger: [] };
+  for (let h = 0; h < 40; h++) {
+    all.fills.push({ time: t0 + h * H + 5, coin: h % 2 ? "BTC" : "SOL", px: "100", sz: "0.5", fee: "0.05", builderFee: "0.025", closedPnl: String((h % 5) - 2), tid: h, oid: h });
+    all.funding.push({ time: t0 + h * H, hash: `f${h}`, delta: { coin: "BTC", usdc: "0.01" } });
+  }
+  all.ledger.push({ time: t0 + 3 * H, hash: "d1", delta: { type: "deposit", usdc: "25" } });
+  const upTo = (rows, asOf) => Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.filter((x) => x.time <= asOf)]));
+  const since = (rows, from) => Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.filter((x) => x.time >= from)]));
+  let cache = null, saves = 0;
+  for (let h = 1; h <= 40; h++) {
+    const asOf = t0 + h * H + 10;
+    const base = checkpointBase(cache, { start, owner, unified: true, asOf });
+    // Only rows from the checkpoint onward are "fetched", as the bot does.
+    const { total, next } = applyCheckpoint(base, since(upTo(all, asOf), base.upTo), { asOf });
+    const full = aggregate({ ...upTo(all, asOf), owner, unified: true, from: start.since });
+    const a = finish(total, { start, equity: 130, upnl: 1, now: asOf }), b = finish(full, { start, equity: 130, upnl: 1, now: asOf });
+    for (const k of ["realized", "fees", "builderFees", "funding", "flows", "trades", "volume", "total", "residual"]) assert.ok(Math.abs(a[k] - b[k]) < 1e-9, `${k} at hour ${h}`);
+    assert.ok(Math.abs(a.byCoin.BTC.funding - b.byCoin.BTC.funding) < 1e-9);
+    if (next) { assert.ok(next.upTo === asOf - CKPT_LAG); cache = next; saves++; }
+  }
+  assert.ok(saves >= 4 && saves <= 6, `checkpoint advanced ${saves} times in 40h`); // every ~6h, not every cycle
+  assert.ok(CKPT_EVERY > CKPT_LAG && CKPT_FULL > CKPT_EVERY);
+});
+
+test("checkpoint is discarded when the start point, account or mode changes, or when it is a day old", async () => {
+  const { checkpointBase, CKPT_FULL } = await import("../src/ledger.js");
+  const owner = "0xAbC0000000000000000000000000000000000001", t0 = 1_794_000_000_000, asOf = t0 + 10 * 3600e3;
+  const start = { since: t0, equity: 100 };
+  const good = { v: 1, since: t0, owner: owner.toLowerCase(), unified: true, upTo: t0 + 8 * 3600e3, fullAt: t0 + 7 * 3600e3, agg: { realized: 1 } };
+  assert.equal(checkpointBase(good, { start, owner, unified: true, asOf }), good);
+  const fresh = (c, o = {}) => checkpointBase(c, { start, owner, unified: true, asOf, ...o }).upTo === t0;
+  assert.ok(fresh(null));
+  assert.ok(fresh({ ...good, since: t0 - 1 }));                 // P&L start re-based
+  assert.ok(fresh(good, { unified: false }));                    // account mode changed
+  assert.ok(fresh(good, { owner: "0x" + "1".repeat(40) }));      // different account
+  assert.ok(fresh({ ...good, upTo: asOf + 1 }));                 // mark in the future
+  assert.ok(fresh(good, { asOf: good.fullAt + CKPT_FULL + 1 })); // daily full rebuild
+});

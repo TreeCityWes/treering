@@ -1,18 +1,22 @@
 #!/usr/bin/env node
 // P&L report: live breakdown from Hyperliquid since the start point, plus trading activity from
 // the cycle history.   node src/report.js [--json]
-import { loadCredentials, loadConfig } from "./config.js";
-import { makeClients, loadMarkets, snapshot } from "./hl.js";
+import { loadOwner, loadConfig } from "./config.js";
+import { makeInfo, loadMarkets, snapshot } from "./hl.js";
+import { readState } from "./control.js";
 import { fetchPnl } from "./ledger.js";
 import { readHistory } from "./history.js";
 
 const json = process.argv.includes("--json");
-const creds = loadCredentials(), cfg = loadConfig();
-const { info } = makeClients({ ...creds, network: creds.network ?? cfg.network });
+// Read-only: needs the owner address, never the agent key. Falls back to the address the bot last ran with.
+const cfg = loadConfig();
+const creds = loadOwner() ?? (readState()?.owner ? { owner: readState().owner, network: readState().network } : null);
+if (!creds) { console.error("No account address: set X1_ACCOUNT_ADDRESS or run the bot once."); process.exit(1); }
+const info = makeInfo(creds.network ?? cfg.network);
 const markets = await loadMarkets(info, cfg.markets);
 const snap = await snapshot(info, creds.owner, markets);
 const upnl = Object.values(snap.positions).reduce((n, p) => n + (p.upnl || 0), 0);
-const p = await fetchPnl(info, creds.owner, { equity: snap.equity, upnl, unified: snap.mode === "unifiedAccount" });
+const p = await fetchPnl(info, creds.owner, { equity: snap.equity, upnl, unified: snap.mode === "unifiedAccount", persist: false });
 for (const [c, x] of Object.entries(p.byCoin)) x.upnl = snap.positions[c]?.upnl ?? 0;
 
 const hist = readHistory(p.since);

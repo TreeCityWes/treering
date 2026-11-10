@@ -24,7 +24,7 @@ if (down && !A.watchdogDown) {
     `🚨 Treering bot is DOWN: ${reason}.`,
     held.length ? `${held.length} open position(s); their stop-losses stay on the exchange, but nothing is rebalancing.` : "No open positions.",
     s?.equity != null ? `Last equity ${money(s.equity)}.` : "",
-    "Check the bot service: systemctl --user status <unit> and its journal.",
+    "Check the bot service with systemctl status and its journal.",
   ].filter(Boolean).join("\n"));
 } else if (!down && A.watchdogDown) {
   const mins = Math.round((now - A.watchdogDown) / 60000);

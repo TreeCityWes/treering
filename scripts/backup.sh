@@ -5,19 +5,26 @@
 #   TREERING_BACKUP_PUBKEY   file with the age recipient (default ~/.config/treering/backup.pub)
 #   TREERING_BACKUP_DIR      local archive dir (default ~/backups/treering), keeps the newest TREERING_BACKUP_KEEP (14)
 #   TREERING_BACKUP_REMOTE   optional rclone destination, e.g. "b2:my-bucket/treering"
-# Restore: age -d -i backup-identity.txt treering-*.tar.age | tar -xz
+#   TREERING_DATA_DIR        state directory (default <repo>/data)
+#   TREERING_BACKUP_FILES    extra files, colon-separated (default the repo's .env.agent, .env.alerts, config.json)
+# Paths inside the archive are relative to /.
+# Restore: age -d -i backup-identity.txt treering-*.tar.age | tar -xz -C <empty dir>
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PUB="${TREERING_BACKUP_PUBKEY:-$HOME/.config/treering/backup.pub}"
 DIR="${TREERING_BACKUP_DIR:-$HOME/backups/treering}"
 KEEP="${TREERING_BACKUP_KEEP:-14}"
+DATA="${TREERING_DATA_DIR:-$ROOT/data}"
+EXTRA="${TREERING_BACKUP_FILES:-$ROOT/.env.agent:$ROOT/.env.alerts:$ROOT/config.json}"
 [ -s "$PUB" ] || { echo "no age public key at $PUB" >&2; exit 1; }
+[ -d "$DATA" ] || { echo "no data directory at $DATA" >&2; exit 1; }
 umask 077
 mkdir -p "$DIR"
 out="$DIR/treering-$(date -u +%Y%m%d-%H%M).tar.age"
-files=(data)
-for f in .env.agent .env.alerts config.json; do [ -e "$ROOT/$f" ] && files+=("$f"); done
-tar -C "$ROOT" -cz "${files[@]}" | age -R "$PUB" -o "$out.tmp"
+files=("${DATA#/}")
+IFS=: read -ra extra <<< "$EXTRA"
+for f in "${extra[@]}"; do [ -e "$f" ] && files+=("${f#/}"); done
+tar -C / -cz "${files[@]}" | age -R "$PUB" -o "$out.tmp"
 mv "$out.tmp" "$out"
 ls -1t "$DIR"/treering-*.tar.age | tail -n +"$((KEEP + 1))" | xargs -r rm --
 if [ -n "${TREERING_BACKUP_REMOTE:-}" ]; then

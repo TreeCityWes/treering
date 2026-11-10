@@ -77,6 +77,8 @@ journalctl --user -u treering -f      # logs
 
 The unit files assume the repo lives in `~/treering`; edit the paths if not.
 
+On a shared server, or one where other software runs under your login, use the hardened layout in [`deploy/system`](deploy/system/README.md): the bot runs as its own unprivileged user and its key and code are root-only.
+
 ## Dashboard
 
 ```sh

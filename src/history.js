@@ -4,7 +4,7 @@
 // about 1.7 MB a day at the default 5-minute interval.
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { PATHS, DEADBAND } from "./config.js";
+import { PATHS, DEADBAND, FILE_MODE, DIR_MODE } from "./config.js";
 
 const r = (v, d = 6) => (Number.isFinite(v) ? Number(v.toFixed(d)) : v ?? null);
 
@@ -32,9 +32,9 @@ export function historyRecord(out) {
 }
 
 export function recordCycle(out) {
-  mkdirSync(PATHS.history, { recursive: true, mode: 0o700 });
+  mkdirSync(PATHS.history, { recursive: true, mode: DIR_MODE });
   const day = new Date(out.ts).toISOString().slice(0, 10);
-  appendFileSync(join(PATHS.history, `${day}.jsonl`), JSON.stringify(historyRecord(out)) + "\n", { mode: 0o600 });
+  appendFileSync(join(PATHS.history, `${day}.jsonl`), JSON.stringify(historyRecord(out)) + "\n", { mode: FILE_MODE });
 }
 
 /** Read records back (for reports and backtests), optionally from a start time. */

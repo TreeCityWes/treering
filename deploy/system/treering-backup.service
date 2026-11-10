@@ -1,0 +1,27 @@
+# Runs as root because it reads the root-only secret files; it can only write to the backup dir.
+[Unit]
+Description=Encrypted backup of Treering bot state
+
+[Service]
+Type=oneshot
+Environment=TREERING_DATA_DIR=/var/lib/treering
+Environment=TREERING_BACKUP_FILES=/etc/treering/agent.env:/etc/treering/alerts.env:/etc/treering/config.json
+Environment=TREERING_BACKUP_PUBKEY=/etc/treering/backup.pub
+Environment=TREERING_BACKUP_DIR=/var/backups/treering
+EnvironmentFile=-/etc/treering/backup.env
+ExecStart=/opt/treering/scripts/backup.sh
+UMask=0077
+ReadWritePaths=/var/backups/treering
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
