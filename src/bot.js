@@ -7,7 +7,8 @@ import { targetRows, buildOrders, drawdownCheck, formatSize, formatPrice } from 
 import { readControl, updateControl, readState, readJson, writeJson, logEvent } from "./control.js";
 import { detectStopFills, syncStops, cancelAllStops } from "./stops.js";
 import { X1_BUILDER } from "./config.js";
-import { notify, alertsEnabled, alertState, saveAlertState, money } from "./alerts.js";
+import { notify, alertsEnabled, alertState, saveAlertState, errorAlerts, money } from "./alerts.js";
+import { initPaper, stepPaper, paperSummary, scoresFor } from "./paper.js";
 import { fetchPnl } from "./ledger.js";
 import { recordCycle } from "./history.js";
 
@@ -25,6 +26,8 @@ let state = readState() ?? {};
 // Stop book: trail state, resting stop oids, re-entry blocks. Persisted across restarts.
 const book = { trail: {}, oids: {}, blocks: {}, ...readJson(PATHS.stops, {}) };
 const saveBook = () => writeJson(PATHS.stops, book);
+// Paper scoreboard (paper.js): alternative rule sets tracked alongside live trading.
+let paper = readJson(PATHS.paper, null);
 const A = alertState();
 // Keys that belonged to the watchdog when it shared this file; it has its own state file now.
 delete A.watchdogDown; delete A.diskHigh;
@@ -37,7 +40,8 @@ function dailySummary(prev, out) {
   const p = out.pnl ?? prev.pnl;
   const since = p ? `Since ${new Date(p.since).toISOString().slice(0, 10)}: ${money(p.total, true)}${p.totalPct != null ? ` (${p.totalPct >= 0 ? "+" : ""}${p.totalPct.toFixed(2)}%)` : ""} · realized ${money(p.realized, true)} · fees ${money(-p.fees, true)} (X1 ${money(-p.builderFees, true)}) · funding ${money(p.funding, true)} · open ${money(p.upnl, true)} · ${p.trades} fills` : null;
   return [`📊 Treering daily summary for ${prev.day} (UTC)`, `Equity ${money(prev.dayStart)} → ${money(prev.equity)}  (${money(pnl, true)}, ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`,
-    `Mode: ${out.live ? "LIVE" : "dry-run"}${out.paused ? ", paused" : ""}`, pos.length ? `Positions:\n${pos.join("\n")}` : "No open positions", `Stops resting: ${stops}/${pos.length}`, since].filter(Boolean).join("\n");
+    `Mode: ${out.live ? "LIVE" : "dry-run"}${out.paused ? ", paused" : ""}`, pos.length ? `Positions:\n${pos.join("\n")}` : "No open positions", `Stops resting: ${stops}/${pos.length}`, since,
+    out.paper && paper ? `Paper scoreboard since ${new Date(paper.startTs).toISOString().slice(0, 10)} (actual account ${money(out.equity - paper.startEquity, true)}):\n${out.paper.map((x) => `${x.label}: ${money(x.change, true)}`).join("\n")}` : null].filter(Boolean).join("\n");
 }
 
 async function alertsFor(prev, out, stopEvents) {
@@ -48,10 +52,7 @@ async function alertsFor(prev, out, stopEvents) {
   if (out.drawdownStop) msgs.push(`🛑 Drawdown stop: equity ${money(out.drawdownStop.equity)} is ${(out.drawdownStop.pct * 100).toFixed(1)}% below its peak ${money(out.drawdownStop.peak)}. The bot is PAUSED; open positions keep their stop-losses. Resume from the dashboard (p) when you have looked. A withdrawal can also trigger this.`);
   else if (prev.paused !== undefined && prev.paused !== out.paused) msgs.push(out.paused ? "⏸ Bot paused" : "▶ Bot resumed");
   if (out.fills?.length) msgs.push(`${out.fills.some((f) => f.error) ? "⚠️ Some orders were rejected" : "✅ Sent"} ${out.fills.length} order(s) · equity ${money(out.equity)}\n` + out.fills.map((f) => `${f.tag} ${f.coin}: ${f.error ? `ERROR ${f.error}` : f.filled ? `filled ${f.filled} @ ${f.avgPx}` : "not filled"}`).join("\n"));
-  if (out.error) {
-    if (!A.errorSince) { A.errorSince = out.ts; A.errorCount = 1; msgs.push(`⚠️ Cycle error: ${out.error}`); }
-    else if (++A.errorCount === 6) msgs.push(`⚠️ Still failing after 6 cycles (~30 min): ${out.error}`);
-  } else if (A.errorSince) { msgs.push(`✅ Recovered after ${A.errorCount} failed cycle(s)`); delete A.errorSince; delete A.errorCount; }
+  msgs.push(...errorAlerts(A, out));
   if (out.killed && !prev.killed) msgs.push(`🛑 Daily loss stop hit: equity ${money(out.equity)} (${money(out.dayPnl, true)} today). Only reductions until UTC midnight.`);
   const stale = /signal (stale|unavailable)/.test(out.skip ?? "");
   if (stale && !A.stale) { A.stale = true; msgs.push(`⚠️ Mood Ring signal problem, so the bot is not trading (${out.skip}). Stop-losses stay in place.`); }
@@ -170,6 +171,14 @@ async function cycle(reason) {
     }
     out.blocks = book.blocks;
     saveBook();
+    // Paper scoreboard. Decides only on a fresh signal, like the live bot. A failure never fails the cycle.
+    try {
+      const scores = signal && signalAge <= cfg.maxSignalAgeSec ? scoresFor(signal, cfg.markets) : null;
+      const ctx = { ts: snapAt, mids: snap.mids, scores, cfg, equity: snap.equity, positions: snap.positions, trail: book.trail };
+      paper = paper ? stepPaper(paper, ctx) : initPaper(ctx);
+      writeJson(PATHS.paper, paper);
+      out.paper = paperSummary(paper);
+    } catch (e) { out.paperError = e.message ?? String(e); console.error(`paper: ${out.paperError}`); }
     // Running P&L since the start point in data/pnl.json. A failure here never fails the cycle.
     try {
       const upnl = Object.values(snap.positions).reduce((n, p) => n + (p.upnl || 0), 0);

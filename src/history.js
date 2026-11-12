@@ -21,12 +21,14 @@ export function historyRecord(out) {
     // Traded markets plus every other coin in the signal, so untraded markets can be backtested too.
     mids: out.mids ? { ...(out.signalMids ?? {}), ...Object.fromEntries(out.cfg.markets.filter((c) => out.mids[c] != null).map((c) => [c, Number(out.mids[c])])) } : null,
     positions: out.positions ? Object.fromEntries(Object.entries(out.positions).filter(([, p]) => p.szi).map(([c, p]) => [c, { szi: p.szi, entryPx: p.entryPx, upnl: r(p.upnl, 4), value: r(p.value, 4) }])) : null,
-    plan: out.rows?.length ? Object.fromEntries(out.rows.map((x) => [x.coin, { score: x.score, current: r(x.current, 2), target: r(x.target, 2), actions: x.actions, ...(x.small ? { small: true } : {}), ...(x.flipHeld ? { flipHeld: true } : {}) }])) : null,
+    plan: out.rows?.length ? Object.fromEntries(out.rows.map((x) => [x.coin, { score: x.score, current: r(x.current, 2), target: r(x.target, 2), actions: x.actions, ...(x.small ? { small: true } : {}), ...(x.flipHeld ? { flipHeld: true } : {}), ...(x.noResize ? { noResize: true } : {}) }])) : null,
     orders: out.orders?.map((o) => ({ coin: o.coin, tag: o.tag, isBuy: o.isBuy, sz: o.sz, px: o.px })) ?? [],
     fills: out.fills?.map((f) => ({ coin: f.coin, tag: f.tag, filled: f.filled ?? null, avgPx: f.avgPx ?? null, error: f.error ?? null })) ?? [],
     stops: out.stops?.map((s) => ({ coin: s.coin, side: s.side, size: s.size, entry: s.entry, stopPx: s.stopPx ?? null, best: s.best ?? null, armed: !!s.armed, status: s.status })) ?? null,
     stopEvents: out.stopEvents?.length ? out.stopEvents : null,
     blocks: out.blocks && Object.keys(out.blocks).length ? out.blocks : null,
+    // Paper scoreboard: each alternative rule set's equity this cycle (see paper.js).
+    ...(out.paper ? { paper: Object.fromEntries(out.paper.map((p) => [p.id, r(p.equity, 4)])) } : {}),
     skip: out.skip, error: out.error,
   };
 }

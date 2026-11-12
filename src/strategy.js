@@ -16,6 +16,8 @@ export function findScore(signal, coin) {
  * score holds the position (`flipHeld`). Not applied while the loss stop is hit, so it can still close.
  * Adds/trims to an open position smaller than cfg.rebalance (max of minGapUsd and minGapFrac ×
  * position) are skipped and marked `small`, to avoid churning fees on noise.
+ * cfg.rebalance.resize === false turns off adds and trims altogether (marked `noResize`): a position
+ * keeps the size it was opened at until it is closed or flipped. The daily loss stop can still trim.
  */
 export function targetRows({ equity, cfg, signal, current, killed = false }) {
   const perCoin = cfg.markets.length ? (equity * cfg.leverage) / cfg.markets.length : 0;
@@ -35,13 +37,14 @@ export function targetRows({ equity, cfg, signal, current, killed = false }) {
     const flip = cur !== 0 && tgt !== 0 && Math.sign(cur) !== Math.sign(tgt);
     const rb = cfg.rebalance ?? {};
     const minGap = Math.max(rb.minGapUsd ?? 0, (rb.minGapFrac ?? 0) * Math.abs(cur));
-    let actions, small = false;
+    let actions, small = false, noResize = false;
     if (hold) actions = [cur === 0 ? "SKIP" : "HOLD"];
     else if (cur !== 0 && (tgt === 0 || flip)) actions = [flip ? "FLIP-CLOSE" : "CLOSE", ...(flip && Math.abs(tgt) >= cfg.minOrderUsd && !killed ? ["FLIP-OPEN"] : [])];
     else if (Math.abs(gap) < cfg.minOrderUsd) actions = [killed && tgt !== raw ? "LOSS-STOP" : "SKIP"];
+    else if (!killed && cur !== 0 && rb.resize === false) { actions = ["SKIP"]; noResize = true; }
     else if (!killed && cur !== 0 && Math.abs(gap) < minGap) { actions = ["SKIP"]; small = true; }
     else actions = [cur === 0 ? "OPEN" : Math.abs(tgt) > Math.abs(cur) ? "ADD" : "REDUCE"];
-    return { coin, score, label, current: cur, target: tgt, gap, actions, ...(small ? { small: true } : {}), ...(weakFlip ? { flipHeld: true } : {}) };
+    return { coin, score, label, current: cur, target: tgt, gap, actions, ...(small ? { small: true } : {}), ...(noResize ? { noResize: true } : {}), ...(weakFlip ? { flipHeld: true } : {}) };
   });
 }
 

@@ -13,6 +13,7 @@ export const PATHS = {
   log: join(DATA_DIR, "events.jsonl"),
   pnl: join(DATA_DIR, "pnl.json"),
   pnlCache: join(DATA_DIR, "pnl-cache.json"),
+  paper: join(DATA_DIR, "paper.json"),
   history: join(DATA_DIR, "history"),
 };
 
@@ -32,7 +33,9 @@ export const DEADBAND = 15;
 
 export const DEFAULT_CONFIG = {
   network: "mainnet",
-  leverage: 3,
+  // Replays of Nov 6–12 history: leverage 2 without resizing beat leverage 3 with resizing in every
+  // quarter of the period, with about 40% of the fees and half the drawdown. Changed 2026-11-13.
+  leverage: 2,
   killPct: 0.1,
   // Drawdown stop: pause the bot (positions keep their stops) when equity falls this far below its
   // highest value seen. The daily loss stop resets every UTC midnight; this one does not. 0 = off.
@@ -47,7 +50,9 @@ export const DEFAULT_CONFIG = {
   builderFee: true,
   // Skip small adds/trims to an existing position: trade only when the gap to target is at least
   // minGapUsd AND at least minGapFrac of the position. Opens, closes and flips are never filtered.
-  rebalance: { minGapUsd: 15, minGapFrac: 0.2 },
+  // resize: false skips every add and trim: a position keeps its opening size until closed or flipped.
+  // Resizing was 54% of traded volume (and of fees) in Nov 6–10 and lost money in replays.
+  rebalance: { minGapUsd: 15, minGapFrac: 0.2, resize: false },
   // Flip hysteresis: only reverse an open position when |score| >= this. Weaker opposite scores hold.
   // Replay of Nov 6–8 history: 20–30 avoided 2 losing HYPE flips; 40 also blocked good ones.
   flipMinScore: 25,
@@ -94,6 +99,7 @@ export function loadConfig() {
   const rb = cfg.rebalance;
   if (!(rb.minGapUsd >= 0 && rb.minGapUsd <= 1e6)) throw new Error("config.rebalance.minGapUsd must be >= 0");
   if (!(rb.minGapFrac >= 0 && rb.minGapFrac < 1)) throw new Error("config.rebalance.minGapFrac must be in [0, 1)");
+  if (typeof rb.resize !== "boolean") throw new Error("config.rebalance.resize must be true or false");
   const st = cfg.stops;
   if (!(st.stopLossPct > 0 && st.stopLossPct <= 0.5)) throw new Error("config.stops.stopLossPct must be in (0, 0.5]");
   if (!(st.stopSlippage > 0 && st.stopSlippage <= 0.2)) throw new Error("config.stops.stopSlippage must be in (0, 0.2]");

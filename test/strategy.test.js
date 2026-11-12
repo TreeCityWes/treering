@@ -17,6 +17,20 @@ test("targets = equity × lev ÷ markets × score/100, deadband holds", () => {
   assert.equal(by.ZEC.target, 60);
 });
 
+test("resize off: no adds or trims, but opens, closes, flips and loss-stop trims still happen", () => {
+  const c = { ...cfg, rebalance: { minGapUsd: 15, minGapFrac: 0.2, resize: false }, flipMinScore: 25 };
+  const sig = { coins: [{ coin: "BTC", score: -80 }, { coin: "ETH", score: 30 }, { coin: "ZEC", score: 60 }] };
+  const by = Object.fromEntries(targetRows({ equity: 100, cfg: c, signal: sig, current: { BTC: -20, ETH: 90, ZEC: -40 } }).map((r) => [r.coin, r]));
+  assert.deepEqual(by.BTC.actions, ["SKIP"]); // would ADD -20 → -80
+  assert.equal(by.BTC.noResize, true);
+  assert.deepEqual(by.ETH.actions, ["SKIP"]); // would REDUCE 90 → 30
+  assert.deepEqual(by.ZEC.actions, ["FLIP-CLOSE", "FLIP-OPEN"]);
+  const opened = targetRows({ equity: 100, cfg: c, signal: sig, current: {} });
+  assert.deepEqual(opened.find((r) => r.coin === "BTC").actions, ["OPEN"]);
+  const killed = targetRows({ equity: 100, cfg: c, signal: { coins: [{ coin: "ETH", score: 30 }] }, current: { ETH: 90 }, killed: true });
+  assert.deepEqual(killed.find((r) => r.coin === "ETH").actions, ["REDUCE"]);
+});
+
 test("gaps under the minimum order are skipped", () => {
   const rows = targetRows({ equity: 100, cfg, signal, current: { BTC: -25 } });
   assert.deepEqual(rows.find((r) => r.coin === "BTC").actions, ["SKIP"]); // gap -6 < $10
