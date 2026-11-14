@@ -9,6 +9,23 @@ export function findScore(signal, coin) {
 }
 
 /**
+ * The signal with each coin's score replaced by its average over the last `hours` (from the
+ * ~24h of 3-minute points the API returns), rounded to 0.1. The reading's own score is kept as
+ * rawScore. A coin with no current score, or no points in the window, keeps its raw score.
+ * hours <= 0 returns the signal unchanged.
+ */
+export function smoothSignal(signal, hours) {
+  if (!(hours > 0) || !signal) return signal;
+  const to = signal.timestamp ?? Date.now(), from = to - hours * 3600e3;
+  return { ...signal, smoothHours: hours, coins: signal.coins.map((c) => {
+    if (c.score == null) return c;
+    const pts = (c.points ?? []).filter(([t]) => t >= from && t <= to);
+    if (!pts.length) return { ...c, rawScore: c.score };
+    return { ...c, rawScore: c.score, score: Math.round((pts.reduce((n, [, s]) => n + s, 0) / pts.length) * 10) / 10 };
+  }) };
+}
+
+/**
  * target notional = equity × leverage ÷ markets × score/100
  * |score| < 15 or missing → hold current position unchanged.
  * killed (daily loss stop hit) → may reduce/close, never add or flip.

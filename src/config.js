@@ -53,6 +53,11 @@ export const DEFAULT_CONFIG = {
   // resize: false skips every add and trim: a position keeps its opening size until closed or flipped.
   // Resizing was 54% of traded volume (and of fees) in Nov 6–10 and lost money in replays.
   rebalance: { minGapUsd: 15, minGapFrac: 0.2, resize: false },
+  // Trade on each coin's score averaged over the last smoothHours (0 = the raw score; at most 24,
+  // the history the signal API returns). Replays of Nov 6–14 with 1-minute stop prices: 8–18h
+  // averaging beat the raw score in both windows tested, with fewer trades and about half the
+  // drawdown; the raw score reacts to noise that reverses within hours. Changed 2026-11-14.
+  smoothHours: 12,
   // Flip hysteresis: only reverse an open position when |score| >= this. Weaker opposite scores hold.
   // Replay of Nov 6–8 history: 20–30 avoided 2 losing HYPE flips; 40 also blocked good ones.
   flipMinScore: 25,
@@ -95,6 +100,7 @@ export function loadOwner() {
 export function loadConfig() {
   const user = existsSync(PATHS.config) ? JSON.parse(readFileSync(PATHS.config, "utf8")) : {};
   const cfg = { ...DEFAULT_CONFIG, ...user, stops: { ...DEFAULT_CONFIG.stops, ...(user.stops ?? {}) }, rebalance: { ...DEFAULT_CONFIG.rebalance, ...(user.rebalance ?? {}) } };
+  if (!(cfg.smoothHours >= 0 && cfg.smoothHours <= 24)) throw new Error("config.smoothHours must be in [0, 24] (0 = raw score)");
   if (!(cfg.flipMinScore >= 0 && cfg.flipMinScore <= 100)) throw new Error("config.flipMinScore must be in [0, 100]");
   const rb = cfg.rebalance;
   if (!(rb.minGapUsd >= 0 && rb.minGapUsd <= 1e6)) throw new Error("config.rebalance.minGapUsd must be >= 0");

@@ -52,7 +52,9 @@ export function parseSignal(data) {
       for (const h of hist) if (Number.isFinite(h[0]) && h[0] > dataTs) dataTs = h[0];
       return { coin: c.coin, score: c.score, label: c.label, tradersLong: c.tradersLong, tradersShort: c.tradersShort,
         posScore: c.posScore, flowScore: c.flowScore, pctLong: c.pctLong, net: c.net, flow1h: c.flow1h, flow24h: c.flow24h, vol24h: c.vol24h, dominantShare: c.dominant?.share,
-        history: hist.map((h) => h[1]).filter(Number.isFinite) };
+        history: hist.map((h) => h[1]).filter(Number.isFinite),
+        // [timestamp, score] pairs over the last ~24h, for smoothing (see smoothSignal).
+        points: hist.filter((h) => Number.isFinite(h[0]) && Number.isFinite(h[1])) };
     });
   const now = data.ts ?? data.timestamp ?? data.now;
   const serverNow = typeof now === "number" ? now : null;

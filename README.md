@@ -13,10 +13,10 @@ A self-hosted trading bot for [Hyperliquid](https://hyperliquid.xyz) that follow
 Every 5 minutes the bot:
 
 1. Reads the public Mood Ring scores and your account state from Hyperliquid.
-2. Sizes a target for each market: `equity × leverage ÷ markets × score/100`. Scores inside ±15 hold the current position. Reversing an open position needs |score| ≥ 25 (`flipMinScore`), so a weak opposite score holds instead of flipping. Gaps under $10 are skipped. By default a position is not resized once open (`rebalance.resize: false`): it keeps its opening size until it is closed or flipped. With resizing on, adds/trims under max($15, 20% of the position) are skipped as churn.
+2. Averages each coin's score over the last 12 hours (`smoothHours`; the API returns 24 hours of 3-minute readings), since the raw score reacts to noise that reverses within hours. Sizes a target for each market from that average: `equity × leverage ÷ markets × score/100`. Scores inside ±15 hold the current position. Reversing an open position needs |score| ≥ 25 (`flipMinScore`), so a weak opposite score holds instead of flipping. Gaps under $10 are skipped. By default a position is not resized once open (`rebalance.resize: false`): it keeps its opening size until it is closed or flipped. With resizing on, adds/trims under max($15, 20% of the position) are skipped as churn.
 3. Sends the difference as IOC limit orders 1% through mid (closes before opens). An order just under the $10 minimum is rounded up one size step, but never to more than 1.5× its target (coins with coarse steps, like ZEC, then wait for a stronger score). Nothing is sent until you turn **live** on.
 4. Keeps exactly one reduce-only stop-market order resting on Hyperliquid for every open position.
-5. Updates a paper scoreboard: a few alternative rule sets (the old leverage-3 rules, a 6-hour smoothed score, leverage 1, trading against the signal) tracked on paper from the same starting point (stops trigger on each minute's high and low, as on the exchange), shown by `npm run pnl` and in the daily Telegram summary.
+5. Updates a paper scoreboard: a few alternative rule sets (the raw score, 6- and 24-hour averages, leverage 3, wider stops, trading against the signal) tracked on paper from the same starting point (stops trigger on each minute's high and low, as on the exchange), shown by `npm run pnl` and in the daily Telegram summary.
 
 The sizing mirrors X1 Terminal's hosted Auto Trader, and the protections mirror the risk section of X1's copybot whitepaper.
 
@@ -59,7 +59,7 @@ Optional `config.json` (defaults shown):
 ```json
 {
   "leverage": 2, "killPct": 0.1, "maxDrawdownPct": 0.15, "minOrderUsd": 10, "intervalSec": 300, "slippage": 0.01,
-  "flipMinScore": 25, "rebalance": { "minGapUsd": 15, "minGapFrac": 0.2, "resize": false },
+  "smoothHours": 12, "flipMinScore": 25, "rebalance": { "minGapUsd": 15, "minGapFrac": 0.2, "resize": false },
   "markets": ["BTC", "ETH", "SOL", "HYPE", "ZEC", "NEAR"], "builderFee": true,
   "stops": { "enabled": true, "stopLossPct": 0.08, "trailArmPct": 0.04, "trailPct": 0.04,
              "stopSlippage": 0.1, "reentryWeightChange": 0.25, "whenNotLive": true }

@@ -104,3 +104,13 @@ test("one failed cycle is silent; two alert; recovery follows only a sent alert"
   assert.match(errorAlerts(A, { ts: 9, error: "timeout" })[0], /6 cycles/);
   assert.match(errorAlerts(A, { ts: 10, error: null })[0], /Recovered after 6/);
 });
+
+test("with score sets, each variant trades on its own smoothing length", () => {
+  const vs = [{ id: "live", label: "live" }, { id: "raw", label: "raw", smoothHours: 0 }];
+  const p = start({ positions: {}, scores: { BTC: 0, ETH: 0 }, variants: vs });
+  const c12 = { ...cfg, smoothHours: 12 };
+  // Raw score 60 but the 12h average only 10 (inside the deadband): raw opens, live holds flat.
+  stepPaper(p, { ts: 300e3, mids: { BTC: 50000, ETH: 2000 }, scores: { BTC: 60, ETH: 0 }, scoreSets: { 0: { BTC: 60, ETH: 0 }, 12: { BTC: 10, ETH: 0 } }, cfg: c12, variants: vs });
+  assert.ok(p.variants.raw.pos.BTC.szi > 0);
+  assert.equal(p.variants.live.pos.BTC, undefined);
+});

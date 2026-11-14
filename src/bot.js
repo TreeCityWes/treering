@@ -3,12 +3,12 @@
 // trade the owner account through a trading-only API wallet. Dry-run until `live` is on.
 import { ALL_MARKETS, PATHS, loadConfig, loadCredentials, ensureDataDir } from "./config.js";
 import { makeClients, loadMarkets, fetchSignal, snapshot, sendOrders, minuteCandles } from "./hl.js";
-import { targetRows, buildOrders, drawdownCheck, formatSize, formatPrice } from "./strategy.js";
+import { targetRows, buildOrders, drawdownCheck, formatSize, formatPrice, smoothSignal } from "./strategy.js";
 import { readControl, updateControl, readState, readJson, writeJson, logEvent } from "./control.js";
 import { detectStopFills, syncStops, cancelAllStops } from "./stops.js";
 import { X1_BUILDER } from "./config.js";
 import { notify, alertsEnabled, alertState, saveAlertState, errorAlerts, money } from "./alerts.js";
-import { initPaper, stepPaper, paperSummary, scoresFor, paperCoins, candleRange } from "./paper.js";
+import { initPaper, stepPaper, paperSummary, scoresFor, paperCoins, candleRange, paperHours, PAPER_VERSION } from "./paper.js";
 import { fetchPnl } from "./ledger.js";
 import { recordCycle } from "./history.js";
 
@@ -28,6 +28,8 @@ const book = { trail: {}, oids: {}, blocks: {}, ...readJson(PATHS.stops, {}) };
 const saveBook = () => writeJson(PATHS.stops, book);
 // Paper scoreboard (paper.js): alternative rule sets tracked alongside live trading.
 let paper = readJson(PATHS.paper, null);
+// A scoreboard from an older set of variants is kept aside and a new one starts from the live account.
+if (paper && paper.v !== PAPER_VERSION) { writeJson(PATHS.paper.replace(/\.json$/, `-v${paper.v}.json`), paper); paper = null; }
 const A = alertState();
 // Keys that belonged to the watchdog when it shared this file; it has its own state file now.
 delete A.watchdogDown; delete A.diskHigh;
@@ -96,7 +98,9 @@ async function cycle(reason) {
   try {
     // A failed signal fetch must not fail the cycle: stop upkeep, flatten and P&L do not need it.
     const [snap, sig] = await Promise.all([snapshot(info, creds.owner, markets), fetchSignal().then((s) => ({ s }), (e) => ({ err: e?.message ?? String(e) }))]);
-    const signal = sig.s ?? null;
+    // Decisions use each coin's score averaged over cfg.smoothHours (rawScore keeps the reading's own).
+    const rawSignal = sig.s ?? null;
+    const signal = smoothSignal(rawSignal, cfg.smoothHours);
     const snapAt = Date.now();
     const me = snap.agents.find((a) => a.address.toLowerCase() === agent.toLowerCase());
     const day = new Date().toISOString().slice(0, 10);
@@ -119,13 +123,13 @@ async function cycle(reason) {
       mode: snap.mode, equity: snap.equity, day, dayStart, dayPnl, killed, peakEquity, drawdown: dd.dd, spot: snap.spot, positions: snap.positions, mids: snap.mids, signalMids,
       agentValidUntil: me?.validUntil ?? null, builderFeeOk: snap.builderFeeUnits >= 50, signalError: sig.err ?? null,
       // Left unset when the fetch failed, so the saved state keeps the last good reading.
-      ...(signal ? { signal: { timestamp: signal.timestamp, timestampFrom: signal.timestampFrom, coins: signal.coins.map(({ history, ...c }) => c) } } : {}),
+      ...(signal ? { signal: { timestamp: signal.timestamp, timestampFrom: signal.timestampFrom, coins: signal.coins.map(({ history, points, rawScore, ...c }) => (rawScore === undefined ? c : { ...c, score: rawScore, smoothScore: c.score })) } } : {}),
     });
     if (signal?.timestampFrom === "server" && !warnedNoHistory) { warnedNoHistory = true; say("signal carries no history timestamps; the freshness check falls back to the server clock", { kind: "control" }); }
     const signalAge = signal?.timestamp ? (Date.now() - signal.timestamp) / 1000 : Infinity;
     const sc = cfg.stops;
     // Without a fresh signal, stop fills are still detected (scored with the last known reading) but no block is lifted.
-    if (sc.enabled) for (const e of await detectStopFills({ info, owner: creds.owner, book, positions: snap.positions, signal: signal ?? state.signal ?? { coins: [] }, sc, now: Date.now(), canRelease: !!signal })) { say(e.msg, e); if (e.stop) stopEvents.push(e); }
+    if (sc.enabled) for (const e of await detectStopFills({ info, owner: creds.owner, book, positions: snap.positions, signal: signal ?? (state.signal ? { ...state.signal, coins: state.signal.coins.map((c) => ({ ...c, score: c.smoothScore ?? c.score })) } : { coins: [] }), sc, now: Date.now(), canRelease: !!signal })) { say(e.msg, e); if (e.stop) stopEvents.push(e); }
     out.stopEvents = stopEvents;
     // No signal: every score is unknown, so every row holds.
     out.rows = targetRows({ equity: snap.equity, cfg, signal: signal ?? { coins: [] }, current: snap.current, killed });
@@ -173,7 +177,10 @@ async function cycle(reason) {
     saveBook();
     // Paper scoreboard. Decides only on a fresh signal, like the live bot. A failure never fails the cycle.
     try {
-      const scores = signal && signalAge <= cfg.maxSignalAgeSec ? scoresFor(signal, cfg.markets) : null;
+      const fresh = rawSignal && signalAge <= cfg.maxSignalAgeSec;
+      const scores = fresh ? scoresFor(rawSignal, cfg.markets) : null;
+      // Each smoothing length a variant uses, averaged the same way as the live decision.
+      const scoreSets = fresh ? Object.fromEntries(paperHours(cfg).map((h) => [h, scoresFor(smoothSignal(rawSignal, h), cfg.markets)])) : null;
       // Trade-price range since the previous cycle, so a paper stop fires on a spike between cycles
       // as a real one does. Without it (first cycle, or the request failed) stops check the mid.
       let ranges = null;
@@ -182,7 +189,7 @@ async function cycle(reason) {
         const candles = coins.length ? await minuteCandles(info, coins, paper.lastTs, snapAt) : {};
         ranges = Object.fromEntries(coins.map((c) => [c, candleRange(candles[c], paper.lastTs)]).filter(([, r]) => r));
       }
-      const ctx = { ts: snapAt, mids: snap.mids, scores, cfg, equity: snap.equity, positions: snap.positions, trail: book.trail, markets, ranges };
+      const ctx = { ts: snapAt, mids: snap.mids, scores, cfg, equity: snap.equity, positions: snap.positions, trail: book.trail, markets, ranges, scoreSets };
       paper = paper ? stepPaper(paper, ctx) : initPaper(ctx);
       writeJson(PATHS.paper, paper);
       out.paper = paperSummary(paper);

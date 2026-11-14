@@ -187,3 +187,22 @@ test("a small open is not rounded up past 1.5x its target (ZEC regression)", () 
   const ok = [{ ...small[0], target: 14, gap: 14 }];
   assert.equal(buildOrders(ok, { markets: zec, mids: { ZEC: 944.28 }, positions: {}, slippage: 0.01, minOrderUsd: 10 })[0].sz, "0.02");
 });
+
+test("smoothSignal averages each coin's points over the window and keeps the raw score", async () => {
+  const { smoothSignal } = await import("../src/strategy.js");
+  const H = 3600e3, now = 100 * H;
+  const signal = { timestamp: now, coins: [
+    { coin: "BTC", score: 40, points: [[now - 13 * H, -90], [now - 11 * H, 10], [now - 6 * H, 20], [now, 40]] },
+    { coin: "ETH", score: null, points: [[now, 30]] },
+    { coin: "SOL", score: -20, points: [] },
+  ] };
+  const s = smoothSignal(signal, 12);
+  assert.equal(s.coins[0].score, 23.3);        // (10 + 20 + 40) / 3; the 13h-old point is outside
+  assert.equal(s.coins[0].rawScore, 40);
+  assert.equal(s.coins[1].score, null);        // no current reading: still unknown
+  assert.equal(s.coins[2].score, -20);         // no points: raw score
+  assert.equal(smoothSignal(signal, 0), signal);
+  // Sizing uses the averaged score.
+  const [row] = targetRows({ equity: 100, cfg: { leverage: 1, markets: ["BTC"], minOrderUsd: 10 }, signal: s, current: {} });
+  assert.ok(Math.abs(row.target - 23.3) < 1e-9);
+});

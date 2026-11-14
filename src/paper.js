@@ -19,14 +19,22 @@ import { stopPlan, releaseReason } from "./stops.js";
 import { DEADBAND } from "./config.js";
 
 export const PAPER_FEE = 0.00095;
+// Bumped when the variant set changes; the bot then keeps the old board aside and starts a new one.
+export const PAPER_VERSION = 2;
 
+// smoothHours: the score average a variant trades on (absent = the live setting, 0 = raw score).
 export const PAPER_VARIANTS = [
   { id: "live", label: "current rules (paper twin)" },
-  { id: "old", label: "old rules: leverage 3, resizing", cfg: { leverage: 3, rebalance: { resize: true } } },
-  { id: "smooth6h", label: "score smoothed over 6h", smoothHours: 6 },
-  { id: "lev1", label: "leverage 1", cfg: { leverage: 1 } },
+  { id: "raw", label: "raw score (rules until Nov 14)", smoothHours: 0 },
+  { id: "smooth6h", label: "score averaged over 6h", smoothHours: 6 },
+  { id: "smooth24h", label: "score averaged over 24h", smoothHours: 24 },
+  { id: "lev3", label: "leverage 3", cfg: { leverage: 3 } },
+  { id: "trail8", label: "wider stops: 8% trail, 12% hard", cfg: { stops: { trailArmPct: 0.08, trailPct: 0.08, stopLossPct: 0.12 } } },
   { id: "fade", label: "against the signal", invert: true, flatStart: true },
 ];
+
+/** The smoothing lengths the variants need, so the bot can average the scores once per length. */
+export const paperHours = (cfg, variants = PAPER_VARIANTS) => [...new Set(variants.map((v) => v.smoothHours ?? cfg.smoothHours ?? 0))];
 
 export function variantCfg(base, v) {
   return { ...base, ...(v.cfg ?? {}), rebalance: { ...base.rebalance, ...(v.cfg?.rebalance ?? {}) }, stops: { ...base.stops, ...(v.cfg?.stops ?? {}) } };
@@ -47,7 +55,7 @@ function freshVariant(v, { equity, positions, mids, trail, scores }) {
 /** Start a scoreboard from the live account. positions: {coin: {szi, entryPx}}; trail: the live stop book's trail. */
 export function initPaper({ ts, equity, positions, mids, trail, scores, variants = PAPER_VARIANTS }) {
   const ctx = { equity, positions, mids, trail, scores };
-  return { v: 1, startTs: ts, startEquity: equity, lastTs: ts, mids: { ...mids }, variants: Object.fromEntries(variants.map((v) => [v.id, freshVariant(v, ctx)])) };
+  return { v: PAPER_VERSION, startTs: ts, startEquity: equity, lastTs: ts, mids: { ...mids }, variants: Object.fromEntries(variants.map((v) => [v.id, freshVariant(v, ctx)])) };
 }
 
 function fill(s, dSz, px) {
@@ -61,8 +69,10 @@ function fill(s, dSz, px) {
  * equity/positions/trail are the live account's, used only to start a variant added later.
  * markets: {coin: {szDecimals}} to round sizes like real orders. ranges: {coin: {lo, hi}}, the
  * trade-price range since the previous cycle (from 1-minute candles), for stop triggers.
+ * scoreSets: {hours: {coin: score}}, the scores averaged over each variant's smoothing length as
+ * the live bot averages them. Without it, a smoothing variant uses an exponential average instead.
  */
-export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, trail, markets = null, ranges = null, variants = PAPER_VARIANTS }) {
+export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, trail, markets = null, ranges = null, scoreSets = null, variants = PAPER_VARIANTS }) {
   const dt = Math.max(0, ts - paper.lastTs);
   for (const v of variants) {
     if (!paper.variants[v.id]) { paper.variants[v.id] = freshVariant(v, { equity, positions, mids, trail, scores }); continue; }
@@ -73,11 +83,12 @@ export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, tra
     let vs = null;
     if (scores) {
       vs = {};
+      const hours = v.smoothHours ?? vc.smoothHours ?? 0, set = scoreSets?.[hours];
       for (const c of vc.markets) {
-        let x = scores[c] ?? null;
+        let x = (set ?? scores)[c] ?? null;
         if (x != null && v.invert) x = -x;
-        if (x != null && v.smoothHours) {
-          const a = 1 - Math.exp(-dt / (v.smoothHours * 3600e3));
+        if (x != null && hours > 0 && !set) {
+          const a = 1 - Math.exp(-dt / (hours * 3600e3));
           x = s.ema[c] == null ? x : s.ema[c] + a * (x - s.ema[c]);
           s.ema[c] = x;
         }
