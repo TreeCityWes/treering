@@ -13,7 +13,8 @@
     "once": "node src/bot.js --once",
     "test": "node --test \"test/*.test.js\"",
     "watch": "watch -c -t -n 2 node src/tui.js --plain",
-    "pnl": "node src/report.js"
+    "pnl": "node src/report.js",
+    "replay": "node scripts/replay.js"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "0.33.3",

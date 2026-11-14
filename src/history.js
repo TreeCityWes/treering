@@ -12,7 +12,7 @@ export function historyRecord(out) {
   return {
     ts: out.ts, v: 1, reason: out.reason, live: out.live, paused: out.paused, durationMs: out.durationMs, mode: out.mode ?? null,
     // The settings in force, so a later replay knows what produced each decision.
-    cfg: out.cfg ? { leverage: out.cfg.leverage, markets: out.cfg.markets, killPct: out.cfg.killPct, maxDrawdownPct: out.cfg.maxDrawdownPct, minOrderUsd: out.cfg.minOrderUsd, slippage: out.cfg.slippage, deadband: DEADBAND, rebalance: out.cfg.rebalance, flipMinScore: out.cfg.flipMinScore, stops: out.cfg.stops, builderFee: out.cfg.builderFee } : null,
+    cfg: out.cfg ? { leverage: out.cfg.leverage, markets: out.cfg.markets, killPct: out.cfg.killPct, maxDrawdownPct: out.cfg.maxDrawdownPct, minOrderUsd: out.cfg.minOrderUsd, slippage: out.cfg.slippage, deadband: DEADBAND, rebalance: out.cfg.rebalance, flipMinScore: out.cfg.flipMinScore, smoothHours: out.cfg.smoothHours, stops: out.cfg.stops, builderFee: out.cfg.builderFee } : null,
     equity: r(out.equity, 4), dayStart: r(out.dayStart, 4), dayPnl: r(out.dayPnl, 4), killed: out.killed ?? null,
     pnl: out.pnl ? { total: r(out.pnl.total, 4), realized: r(out.pnl.realized, 4), fees: r(out.pnl.fees, 4), funding: r(out.pnl.funding, 4), upnl: r(out.pnl.upnl, 4), residual: r(out.pnl.residual, 4), ...(out.pnlError ? { error: out.pnlError } : {}), ...(out.pnl.stale ? { stale: true } : {}) } : null,
     signalTs: out.signal?.timestamp ?? null, ...(out.signalError ? { signalError: out.signalError } : {}),
