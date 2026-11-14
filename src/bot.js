@@ -2,13 +2,13 @@
 // Mood Ring bot: every cycle, read the public Mood Ring scores, size targets, and
 // trade the owner account through a trading-only API wallet. Dry-run until `live` is on.
 import { ALL_MARKETS, PATHS, loadConfig, loadCredentials, ensureDataDir } from "./config.js";
-import { makeClients, loadMarkets, fetchSignal, snapshot, sendOrders } from "./hl.js";
+import { makeClients, loadMarkets, fetchSignal, snapshot, sendOrders, minuteCandles } from "./hl.js";
 import { targetRows, buildOrders, drawdownCheck, formatSize, formatPrice } from "./strategy.js";
 import { readControl, updateControl, readState, readJson, writeJson, logEvent } from "./control.js";
 import { detectStopFills, syncStops, cancelAllStops } from "./stops.js";
 import { X1_BUILDER } from "./config.js";
 import { notify, alertsEnabled, alertState, saveAlertState, errorAlerts, money } from "./alerts.js";
-import { initPaper, stepPaper, paperSummary, scoresFor } from "./paper.js";
+import { initPaper, stepPaper, paperSummary, scoresFor, paperCoins, candleRange } from "./paper.js";
 import { fetchPnl } from "./ledger.js";
 import { recordCycle } from "./history.js";
 
@@ -174,7 +174,15 @@ async function cycle(reason) {
     // Paper scoreboard. Decides only on a fresh signal, like the live bot. A failure never fails the cycle.
     try {
       const scores = signal && signalAge <= cfg.maxSignalAgeSec ? scoresFor(signal, cfg.markets) : null;
-      const ctx = { ts: snapAt, mids: snap.mids, scores, cfg, equity: snap.equity, positions: snap.positions, trail: book.trail };
+      // Trade-price range since the previous cycle, so a paper stop fires on a spike between cycles
+      // as a real one does. Without it (first cycle, or the request failed) stops check the mid.
+      let ranges = null;
+      if (paper && snapAt - paper.lastTs < 3600e3) {
+        const coins = paperCoins(paper).filter((c) => markets[c]);
+        const candles = coins.length ? await minuteCandles(info, coins, paper.lastTs, snapAt) : {};
+        ranges = Object.fromEntries(coins.map((c) => [c, candleRange(candles[c], paper.lastTs)]).filter(([, r]) => r));
+      }
+      const ctx = { ts: snapAt, mids: snap.mids, scores, cfg, equity: snap.equity, positions: snap.positions, trail: book.trail, markets, ranges };
       paper = paper ? stepPaper(paper, ctx) : initPaper(ctx);
       writeJson(PATHS.paper, paper);
       out.paper = paperSummary(paper);

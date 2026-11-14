@@ -6,13 +6,15 @@
 // the scoreboard begins, then trades on its own. It reuses the live sizing code (targetRows) and
 // stop logic (stopPlan, releaseReason). Simplifications, all small at this size:
 //   - fills at the cycle's mid price plus fees (0.045% Hyperliquid + 0.05% X1 builder); no slippage,
-//     no minimum-size rounding, no funding;
-//   - stops are checked against each cycle's mid and fill at the stop price (the exchange checks
-//     continuously, so a stop can fire on a wick the paper never sees);
+//     no funding. Sizes are rounded as real orders are (size step, $10 minimum) when the markets'
+//     size decimals are passed in;
+//   - stops trigger on the lowest/highest trade price since the previous cycle when 1-minute
+//     ranges are passed in (as the exchange triggers between cycles), else on the cycle's mid,
+//     and fill at the stop price;
 //   - no daily loss stop or drawdown pause.
 // "current rules" is a paper twin of the live bot: the gap between it and the real account is the
 // model's error, and tells how far to trust the other rows.
-import { targetRows, findScore } from "./strategy.js";
+import { targetRows, findScore, orderSize } from "./strategy.js";
 import { stopPlan, releaseReason } from "./stops.js";
 import { DEADBAND } from "./config.js";
 
@@ -57,8 +59,10 @@ function fill(s, dSz, px) {
  * Advance every variant by one cycle. scores: {coin: score|null} from a fresh signal, or null when
  * there is none (then positions are only marked to market and checked against their stops).
  * equity/positions/trail are the live account's, used only to start a variant added later.
+ * markets: {coin: {szDecimals}} to round sizes like real orders. ranges: {coin: {lo, hi}}, the
+ * trade-price range since the previous cycle (from 1-minute candles), for stop triggers.
  */
-export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, trail, variants = PAPER_VARIANTS }) {
+export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, trail, markets = null, ranges = null, variants = PAPER_VARIANTS }) {
   const dt = Math.max(0, ts - paper.lastTs);
   for (const v of variants) {
     if (!paper.variants[v.id]) { paper.variants[v.id] = freshVariant(v, { equity, positions, mids, trail, scores }); continue; }
@@ -81,10 +85,12 @@ export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, tra
       }
       s.last = { ...vs };
     }
-    // 3. Stops, checked at this cycle's price.
+    // 3. Stops, checked against the price range since the last cycle (or this cycle's mid).
     if (sc.enabled !== false) for (const [c, p] of Object.entries(s.pos)) {
       const t = s.trail[c], m = mids[c], side = Math.sign(p.szi);
-      if (!t || !(m > 0) || !(side > 0 ? m <= t.stopPx : m >= t.stopPx)) continue;
+      if (!t || !(m > 0)) continue;
+      const lo = Math.min(m, ranges?.[c]?.lo ?? m), hi = Math.max(m, ranges?.[c]?.hi ?? m);
+      if (!(side > 0 ? lo <= t.stopPx : hi >= t.stopPx)) continue;
       s.equity += p.szi * (t.stopPx - m);
       fill(s, p.szi, t.stopPx); s.stopsHit++;
       // Scored with the last known reading when there is no fresh one, as the live bot does.
@@ -99,14 +105,22 @@ export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, tra
       for (const r of targetRows({ equity: s.equity, cfg: vc, signal, current })) {
         const c = r.coin, m = mids[c];
         if (!(m > 0)) continue;
+        // Signed size for a notional, rounded as a real order would be (0 = the order is skipped).
+        const size = (usd, reduceOnly = false) => {
+          if (!markets?.[c]) return usd / m;
+          const px = usd > 0 ? m * (1 + vc.slippage) : m * (1 - vc.slippage);
+          const sz = orderSize(Math.abs(usd) / m, { px, szDecimals: markets[c].szDecimals, minOrderUsd: vc.minOrderUsd, reduceOnly, posSz: Math.abs(s.pos[c]?.szi ?? 0) });
+          return sz ? Math.sign(usd) * Number(sz) : 0;
+        };
         for (const a of r.actions) {
           if ((a === "CLOSE" || a === "FLIP-CLOSE") && s.pos[c]) { fill(s, s.pos[c].szi, m); delete s.pos[c]; delete s.trail[c]; }
-          else if ((a === "OPEN" || a === "FLIP-OPEN") && !s.blocks[c]) { const sz = r.target / m; fill(s, sz, m); s.pos[c] = { szi: sz, entry: m }; }
+          else if ((a === "OPEN" || a === "FLIP-OPEN") && !s.blocks[c]) { const sz = size(r.target); if (sz) { fill(s, sz, m); s.pos[c] = { szi: sz, entry: m }; } }
           else if (a === "ADD" && s.pos[c]) {
-            const d = r.gap / m, p = s.pos[c];
+            const d = size(r.gap), p = s.pos[c];
+            if (!d) continue;
             fill(s, d, m);
             p.entry = (p.entry * Math.abs(p.szi) + m * Math.abs(d)) / (Math.abs(p.szi) + Math.abs(d)); p.szi += d;
-          } else if (a === "REDUCE" && s.pos[c]) { const d = r.gap / m; fill(s, d, m); s.pos[c].szi += d; }
+          } else if (a === "REDUCE" && s.pos[c]) { const d = size(r.gap, true); if (d) { fill(s, d, m); s.pos[c].szi += d; } }
         }
       }
     }
@@ -126,6 +140,16 @@ export function paperSummary(paper, variants = PAPER_VARIANTS) {
     const s = paper.variants[v.id];
     return { id: v.id, label: v.label, equity: s.equity, change: s.equity - paper.startEquity, fees: s.fees, trades: s.trades, stopsHit: s.stopsHit, maxDD: s.maxDD, positions: Object.keys(s.pos).length };
   });
+}
+
+/** Coins any variant holds, whose price range since the last cycle the stop check needs. */
+export const paperCoins = (paper) => [...new Set(Object.values(paper.variants).flatMap((s) => Object.keys(s.pos)))];
+
+/** Lowest and highest trade price per coin from 1-minute candles [{t, h, l}] opened at or after `from`. */
+export function candleRange(candles, from) {
+  let lo = Infinity, hi = -Infinity;
+  for (const k of candles ?? []) if (k.t >= from) { lo = Math.min(lo, Number(k.l)); hi = Math.max(hi, Number(k.h)); }
+  return hi > -Infinity ? { lo, hi } : null;
 }
 
 /** Scores for the traded markets from a signal reading. */

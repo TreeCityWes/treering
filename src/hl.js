@@ -107,6 +107,15 @@ export async function snapshot(info, owner, markets) {
   };
 }
 
+/**
+ * 1-minute candles per coin since `from` (public; empty for a coin whose request failed), for the
+ * paper scoreboard's stop check between cycles.
+ */
+export async function minuteCandles(info, coins, from, to) {
+  const res = await Promise.all(coins.map((coin) => info.candleSnapshot({ coin, interval: "1m", startTime: Math.floor(from), endTime: Math.ceil(to) }).catch(() => [])));
+  return Object.fromEntries(coins.map((c, i) => [c, res[i]]));
+}
+
 export async function sendOrders(exchange, orders, builderFee) {
   const req = { orders: orders.map((o) => o.wire), grouping: "na" };
   if (builderFee) req.builder = X1_BUILDER;

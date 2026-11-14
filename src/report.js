@@ -57,7 +57,7 @@ else console.log("  history: no cycle records yet (data/history/ fills in as the
 if (board) {
   const days = (Date.now() - paper.startTs) / 864e5;
   console.log(`\nPaper scoreboard since ${new Date(paper.startTs).toISOString().replace("T", " ").slice(0, 16)} UTC (${days.toFixed(1)} days), every row starting from the live account at $${paper.startEquity.toFixed(2)}`);
-  console.log("(paper fills at mid plus fees; stops checked once a cycle; no funding. \"current rules\" vs actual shows the model's error)\n");
+  console.log("(paper fills at mid plus fees; stops on 1-minute highs/lows; no funding. \"current rules\" vs actual shows the model's error)\n");
   const pw = [32, 9, 8, 7, 7, 6, 7];
   console.log("  " + row(["rules", "change", "fees", "trades", "stops", "open", "max dd"], pw));
   console.log("  " + row(["actual account", $(snap.equity - paper.startEquity), "", "", "", "", ""], pw));

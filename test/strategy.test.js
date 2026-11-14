@@ -177,3 +177,13 @@ test("no signal: every row holds and nothing is ordered", () => {
   assert.deepEqual(rows.map((r) => r.actions[0]), ["HOLD", "SKIP", "HOLD"]);
   assert.deepEqual(buildOrders(rows, { markets, mids, positions: { BTC: { szi: -0.000375 }, ZEC: { szi: 0.1 } }, slippage: 0.01, minOrderUsd: 10 }), []);
 });
+
+test("a small open is not rounded up past 1.5x its target (ZEC regression)", () => {
+  const zec = { ZEC: { asset: 214, szDecimals: 2 } };
+  // Live case: $10.70 target at mid 944.28; one 0.01 step is under $10, two would be $18.90.
+  const small = [{ coin: "ZEC", score: 23, current: 0, target: 10.7, gap: 10.7, actions: ["OPEN"] }];
+  assert.equal(buildOrders(small, { markets: zec, mids: { ZEC: 944.28 }, positions: {}, slippage: 0.01, minOrderUsd: 10 }).length, 0);
+  // $14: rounding to 0.02 is 1.35x the target, so it goes through.
+  const ok = [{ ...small[0], target: 14, gap: 14 }];
+  assert.equal(buildOrders(ok, { markets: zec, mids: { ZEC: 944.28 }, positions: {}, slippage: 0.01, minOrderUsd: 10 })[0].sz, "0.02");
+});

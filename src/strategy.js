@@ -71,6 +71,31 @@ export function formatSize(sz, szDecimals) {
   return String(Math.floor(sz * f + 1e-9) / f);
 }
 
+// A small open is rounded up to clear the $10 minimum, but never to more than this multiple of
+// the size asked for. Coarse size steps (ZEC trades in 0.01 ≈ $9) otherwise turn a $10.70 target
+// into $19, and with resizing off the position keeps that size until it closes.
+export const MAX_ROUND_UP = 1.5;
+
+/**
+ * Order size as a string at Hyperliquid's size step, or null to skip the order. Hyperliquid checks
+ * the $10 minimum at the order's limit price (1% worse than mid) and exempts only full closes, so
+ * an order sized to ~$10 at mid can be rejected. Within 15% of the minimum it is rounded up to the
+ * smallest size that clears it with 0.5% headroom, unless that is more than MAX_ROUND_UP times the
+ * size asked for or (for a reduce) more than the position; further below it is skipped.
+ */
+export function orderSize(szNum, { px, szDecimals, minOrderUsd, reduceOnly = false, posSz = Infinity, fullClose = false }) {
+  let sz = formatSize(szNum, szDecimals);
+  if (!fullClose && Number(sz) * px < minOrderUsd) {
+    if (szNum * px < minOrderUsd * 0.85) return null;
+    const step = 10 ** -szDecimals;
+    const bumped = Math.ceil((minOrderUsd * 1.005) / px / step - 1e-9) * step;
+    if (bumped > szNum * MAX_ROUND_UP + 1e-12) return null;
+    if (reduceOnly && bumped > posSz + 1e-12) return null;
+    sz = formatSize(bumped, szDecimals);
+  }
+  return Number(sz) > 0 ? sz : null;
+}
+
 /** Turn plan rows into IOC limit orders priced `slippage` through mid. */
 export function buildOrders(rows, { markets, mids, positions, slippage, minOrderUsd }) {
   const orders = [];
@@ -80,19 +105,8 @@ export function buildOrders(rows, { markets, mids, positions, slippage, minOrder
     const posSz = Math.abs(positions[r.coin]?.szi ?? 0);
     const push = (tag, isBuy, szNum, reduceOnly, fullClose = false) => {
       const px = formatPrice(isBuy ? mid * (1 + slippage) : mid * (1 - slippage), m.szDecimals);
-      let sz = formatSize(szNum, m.szDecimals);
-      // Hyperliquid checks the $10 minimum at the order's limit price (1% worse than mid) and
-      // exempts only full closes, so an order sized to ~$10 at mid can be rejected. If it is
-      // within 15% of the minimum, round up to the smallest size that clears it with 0.5%
-      // headroom (never past the position for a reduce); otherwise skip it.
-      if (!fullClose && Number(sz) * Number(px) < minOrderUsd) {
-        if (szNum * Number(px) < minOrderUsd * 0.85) return;
-        const step = 10 ** -m.szDecimals;
-        const bumped = Math.ceil((minOrderUsd * 1.005) / Number(px) / step - 1e-9) * step;
-        if (reduceOnly && bumped > posSz + 1e-12) return;
-        sz = formatSize(bumped, m.szDecimals);
-      }
-      if (Number(sz) <= 0) return;
+      const sz = orderSize(szNum, { px: Number(px), szDecimals: m.szDecimals, minOrderUsd, reduceOnly, posSz, fullClose });
+      if (!sz) return;
       const ntl = Number(sz) * mid;
       orders.push({ coin: r.coin, tag, isBuy, sz, px, ntl, reduceOnly, wire: { a: m.asset, b: isBuy, p: px, s: sz, r: reduceOnly, t: { limit: { tif: "Ioc" } } } });
     };

@@ -50,6 +50,27 @@ test("a stop crossing closes at the stop price and blocks re-entry", () => {
   assert.equal(s.pos.BTC, undefined);
 });
 
+test("a stop fires on the range between cycles even when the mid never reaches it", () => {
+  const p = start();
+  stepPaper(p, { ts: 300e3, mids: { BTC: 50000, ETH: 2000 }, scores: { BTC: -40, ETH: 0 }, cfg, variants: V });
+  // Stop at 54000 (8% hard stop on the short). The mid only reaches 53000, but a spike traded 54100.
+  stepPaper(p, { ts: 600e3, mids: { BTC: 53000, ETH: 2000 }, scores: null, ranges: { BTC: { lo: 52900, hi: 54100 } }, cfg, variants: V });
+  assert.equal(p.variants.live.pos.BTC, undefined);
+  assert.equal(p.variants.live.stopsHit, 1);
+});
+
+test("with size decimals, paper orders round like real ones", () => {
+  const p = start({ positions: {}, scores: { BTC: 0, ETH: 0 } });
+  // A coarse 0.01 ETH step ($20 at 2000): a $16 target (100 × 2 / 2 × 0.16) rounds up to one step.
+  const markets = { BTC: { szDecimals: 5 }, ETH: { szDecimals: 2 } };
+  stepPaper(p, { ts: 300e3, mids: { BTC: 50000, ETH: 2000 }, scores: { BTC: 0, ETH: 16 }, cfg: { ...cfg, slippage: 0.01 }, markets, variants: V });
+  assert.equal(p.variants.live.pos.ETH.szi, 0.01);
+  // Without size decimals the paper fills the exact notional.
+  const q = start({ positions: {}, scores: { BTC: 0, ETH: 0 } });
+  stepPaper(q, { ts: 300e3, mids: { BTC: 50000, ETH: 2000 }, scores: { BTC: 0, ETH: 16 }, cfg: { ...cfg, slippage: 0.01 }, variants: V });
+  assert.ok(Math.abs(q.variants.live.pos.ETH.szi - 0.008) < 1e-12);
+});
+
 test("without a signal positions are only marked, never traded", () => {
   const p = start();
   stepPaper(p, { ts: 300e3, mids: { BTC: 50000, ETH: 2000 }, scores: null, cfg, variants: V });
