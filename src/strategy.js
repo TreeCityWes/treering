@@ -95,8 +95,9 @@ export const MAX_ROUND_UP = 1.5;
 
 /**
  * Order size as a string at Hyperliquid's size step, or null to skip the order. Hyperliquid checks
- * the $10 minimum at the order's limit price (1% worse than mid) and exempts only full closes, so
- * an order sized to ~$10 at mid can be rejected. Within 15% of the minimum it is rounded up to the
+ * the $10 minimum at the lower of the limit price and mid (a sell's limit, a buy's mid; an ETH buy
+ * worth $10.05 at its limit but $9.95 at mid was rejected on 2026-11-15) and exempts only full
+ * closes. Pass that lower price as `px`. Within 15% of the minimum it is rounded up to the
  * smallest size that clears it with 0.5% headroom, unless that is more than MAX_ROUND_UP times the
  * size asked for or (for a reduce) more than the position; further below it is skipped.
  */
@@ -122,7 +123,7 @@ export function buildOrders(rows, { markets, mids, positions, slippage, minOrder
     const posSz = Math.abs(positions[r.coin]?.szi ?? 0);
     const push = (tag, isBuy, szNum, reduceOnly, fullClose = false) => {
       const px = formatPrice(isBuy ? mid * (1 + slippage) : mid * (1 - slippage), m.szDecimals);
-      const sz = orderSize(szNum, { px: Number(px), szDecimals: m.szDecimals, minOrderUsd, reduceOnly, posSz, fullClose });
+      const sz = orderSize(szNum, { px: Math.min(Number(px), mid), szDecimals: m.szDecimals, minOrderUsd, reduceOnly, posSz, fullClose });
       if (!sz) return;
       const ntl = Number(sz) * mid;
       orders.push({ coin: r.coin, tag, isBuy, sz, px, ntl, reduceOnly, wire: { a: m.asset, b: isBuy, p: px, s: sz, r: reduceOnly, t: { limit: { tif: "Ioc" } } } });

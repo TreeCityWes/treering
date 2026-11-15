@@ -119,7 +119,7 @@ export function stepPaper(paper, { ts, mids, scores, cfg, equity, positions, tra
         // Signed size for a notional, rounded as a real order would be (0 = the order is skipped).
         const size = (usd, reduceOnly = false) => {
           if (!markets?.[c]) return usd / m;
-          const px = usd > 0 ? m * (1 + vc.slippage) : m * (1 - vc.slippage);
+          const px = usd > 0 ? m : m * (1 - vc.slippage);   // where Hyperliquid checks the $10 minimum
           const sz = orderSize(Math.abs(usd) / m, { px, szDecimals: markets[c].szDecimals, minOrderUsd: vc.minOrderUsd, reduceOnly, posSz: Math.abs(s.pos[c]?.szi ?? 0) });
           return sz ? Math.sign(usd) * Number(sz) : 0;
         };

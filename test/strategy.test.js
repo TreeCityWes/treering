@@ -72,6 +72,15 @@ test("orders near $10 are bumped to clear the minimum at the limit price", () =>
   assert.equal(o.sz, "0.13");
 });
 
+test("a buy clears the minimum at mid, not just at its higher limit price (ETH regression)", () => {
+  // Live 2026-11-15: target $10.12 at mid 1776.7 → 0.0056 ETH = $10.05 at the limit but $9.95 at mid; rejected.
+  const rows = [{ coin: "ETH", score: 22.1, current: 0, target: 10.12, gap: 10.12, actions: ["OPEN"] }];
+  const [o] = buildOrders(rows, { markets: { ETH: { asset: 1, szDecimals: 4 } }, mids: { ETH: 1776.7 }, positions: {}, slippage: 0.01, minOrderUsd: 10 });
+  assert.equal(o.px, "1794.5");
+  assert.equal(o.sz, "0.0057");
+  assert.ok(Number(o.sz) * 1776.7 >= 10);
+});
+
 test("orders far below $10 are skipped, not inflated", () => {
   const c = { leverage: 1, minOrderUsd: 10, markets: ["HYPE"] };
   const rows = targetRows({ equity: 8, cfg: c, signal: { coins: [{ coin: "HYPE", score: -100 }] }, current: {} });
