@@ -28,14 +28,15 @@ if (records.length < 2) { console.error("Not enough history to replay."); proces
 
 // Each variant: { name, cfg: <bot config overrides>, sim: <replay-only options, see SIM_DEFAULTS> }.
 const WIDE = { trailArmPct: 0.08, trailPct: 0.08, stopLossPct: 0.12 };
+const TIGHT = { trailArmPct: 0.04, trailPct: 0.04, stopLossPct: 0.08 };
 const BUILTIN = [
   { name: "current settings" },
   { name: "raw score (no averaging)", sim: { smoothHours: 0 } },
   { name: "no stops at all", cfg: { stops: { enabled: false } } },
   { name: "hard stop only (no trail)", cfg: { stops: { trailArmPct: 9 } } },
   { name: "no re-entry block", sim: { reentryBlock: false } },
-  { name: "ZEC wide stops (8% trail, 12% hard)", sim: { stopsByCoin: { ZEC: WIDE } } },
-  { name: "all coins wide stops", cfg: { stops: WIDE } },
+  { name: "old stops (4% trail, 8% hard)", cfg: { stops: TIGHT } },
+  { name: "even wider (12% trail, 16% hard)", cfg: { stops: { trailArmPct: 0.12, trailPct: 0.12, stopLossPct: 0.16 } } },
   { name: "smooth signal 2h", sim: { smoothHours: 2 } },
   { name: "smooth signal 6h", sim: { smoothHours: 6 } },
   { name: "smooth signal 12h", sim: { smoothHours: 12 } },
@@ -44,7 +45,6 @@ const BUILTIN = [
   // Leverage 2.5 on five markets keeps each coin's size the same as 3 on six.
   { name: "drop HYPE (same size per coin)", cfg: { markets: ["BTC", "ETH", "SOL", "ZEC", "NEAR"], leverage: 2.5 } },
   { name: "flip only at |score| >= 40", cfg: { flipMinScore: 40 } },
-  { name: "smooth 6h + ZEC wide + no HYPE", cfg: { markets: ["BTC", "ETH", "SOL", "ZEC", "NEAR"], leverage: 2.5 }, sim: { smoothHours: 6, stopsByCoin: { ZEC: WIDE } } },
 ];
 const variants = opt("variants") ? JSON.parse(readFileSync(opt("variants"), "utf8")) : BUILTIN;
 

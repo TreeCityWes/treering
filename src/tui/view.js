@@ -383,7 +383,7 @@ function safetyBody(m, w) {
   if (m.s) {
     const rest = stops.filter((x) => x.status === "resting").length, trail = stops.filter((x) => x.armed).map((x) => bare(x.coin));
     const blocks = Object.keys(m.s.blocks ?? {}).map(bare);
-    const sl = Math.round((m.c.stops?.stopLossPct ?? 0.08) * 100);
+    const sl = Math.round((m.c.stops?.stopLossPct ?? 0.12) * 100);
     const ok = held === 0 || rest >= held;
     out.push(`${pad(C.mute("stop-losses"), lw)}${ok ? C.up("✓") : C.warn("!")} ${C.soft(m.c.stops?.enabled === false ? "disabled" : `${rest}/${held} resting on exchange · ${sl}% hard`)}${trail.length ? C.up(` · trailing ${trail.join(" ")}`) : ""}${blocks.length ? C.down(` · blocked ${blocks.join(" ")}`) : ""}`);
   }

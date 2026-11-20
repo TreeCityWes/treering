@@ -61,13 +61,17 @@ export const DEFAULT_CONFIG = {
   // Flip hysteresis: only reverse an open position when |score| >= this. Weaker opposite scores hold.
   // Replay of Nov 6–8 history: 20–30 avoided 2 losing HYPE flips; 40 also blocked good ones.
   flipMinScore: 25,
-  // Protective stops, as in the X1 copybot whitepaper (Blue Bear's settings).
+  // Protective stops. Until 2026-11-20 these were the X1 copybot whitepaper's (8% hard, trail 4%
+  // arming at +4%). Those sat inside these coins' normal swings: ZEC's short was stopped at 970
+  // a few dollars from the top, then ZEC fell 24%. Wider stops beat them in the replay of all
+  // 14 days (+$17.03 vs +$8.04, both halves, lower drawdown), in the 6-day replay with 1-minute
+  // prices (+$1.70 vs −$1.26) and on the paper scoreboard since Nov 14 (best of all variants).
   stops: {
     enabled: true,
-    stopLossPct: 0.08,        // hard stop 8% adverse to entry, resting on the exchange
+    stopLossPct: 0.12,        // hard stop 12% adverse to entry, resting on the exchange
     stopSlippage: 0.10,       // worst fill accepted when the stop triggers
-    trailArmPct: 0.04,        // arm the trail once 4% in favour…
-    trailPct: 0.04,           // …then trail 4% behind the best price (breakeven +0.1% floor)
+    trailArmPct: 0.08,        // arm the trail once 8% in favour…
+    trailPct: 0.08,           // …then trail 8% behind the best price (breakeven +0.1% floor)
     reentryWeightChange: 0.25, // lift a re-entry block when the weight moves >25% (or flips/flat/gone)
     whenNotLive: true,        // keep protecting open positions even in dry-run or paused
   },

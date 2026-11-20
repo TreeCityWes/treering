@@ -20,7 +20,7 @@ import { DEADBAND } from "./config.js";
 
 export const PAPER_FEE = 0.00095;
 // Bumped when the variant set changes; the bot then keeps the old board aside and starts a new one.
-export const PAPER_VERSION = 2;
+export const PAPER_VERSION = 3;
 
 // smoothHours: the score average a variant trades on (absent = the live setting, 0 = raw score).
 export const PAPER_VARIANTS = [
@@ -29,7 +29,8 @@ export const PAPER_VARIANTS = [
   { id: "smooth6h", label: "score averaged over 6h", smoothHours: 6 },
   { id: "smooth24h", label: "score averaged over 24h", smoothHours: 24 },
   { id: "lev3", label: "leverage 3", cfg: { leverage: 3 } },
-  { id: "trail8", label: "wider stops: 8% trail, 12% hard", cfg: { stops: { trailArmPct: 0.08, trailPct: 0.08, stopLossPct: 0.12 } } },
+  { id: "tight", label: "old stops: 4% trail, 8% hard", cfg: { stops: { trailArmPct: 0.04, trailPct: 0.04, stopLossPct: 0.08 } } },
+  { id: "wide16", label: "even wider stops: 12% trail, 16% hard", cfg: { stops: { trailArmPct: 0.12, trailPct: 0.12, stopLossPct: 0.16 } } },
   { id: "fade", label: "against the signal", invert: true, flatStart: true },
 ];
 
